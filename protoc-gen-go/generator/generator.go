@@ -1599,6 +1599,14 @@ func (g *Generator) goTag(message *Descriptor, field *descriptor.FieldDescriptor
 		defaultValue))
 }
 
+func (g *Generator) goValidTag(field *descriptor.FieldDescriptorProto) string {
+	valid := ""
+	if field.Options != nil && strings.HasPrefix(field.Options.String(), "71111:") {
+		valid = "valid:" + strings.TrimSpace(field.Options.String())[6:]
+	}
+	return valid
+}
+
 func needsStar(typ descriptor.FieldDescriptorProto_Type) bool {
 	switch typ {
 	case descriptor.FieldDescriptorProto_TYPE_GROUP:
@@ -1785,7 +1793,7 @@ func (g *Generator) generateMessage(message *Descriptor) {
 		fieldName, fieldGetterName := ns[0], ns[1]
 		typename, wiretype := g.GoType(message, field)
 		jsonName := *field.Name
-		tag := fmt.Sprintf("protobuf:%s json:%q", g.goTag(message, field, wiretype), jsonName+",omitempty")
+		tag := fmt.Sprintf("protobuf:%s %s json:%q", g.goTag(message, field, wiretype), g.goValidTag(field), jsonName+",omitempty")
 
 		fieldNames[field] = fieldName
 		fieldGetterNames[field] = fieldGetterName
