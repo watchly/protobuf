@@ -15,33 +15,38 @@ information about protocol buffers themselves, see
 
 This fork of `github.com/golang/protobuf` adds support for `govalidate` based validation to protobuf output files. It does this by (ab)using the `extend` functionality of protobuf to let you define a new field that is then plucked out and a `Validate()` function written. For example:
 
-
-
 **user.proto**
 
-```proto
+```protobuf
 syntax = "proto3";
+
+package user;
 
 import "google/protobuf/descriptor.proto";
 
-package foo;
-
-// Unfortunately this is required in your proto files, though
-// it can be imported from a shared.proto or similar
 extend google.protobuf.FieldOptions {
-  string valid = 71111; // Don't change this
+  string valid = 71111;
 }
 
 message User {
-  string name    = 1 [(valid)="trim,truncate(50),length(3|256),alpha"];
+  string name    = 1 [(valid)="trim,truncate(256),length(3|256),alpha"];
   int32  age     = 2;
   string email   = 3 [(valid)="trim,tolower,email"];
   string website = 4 [(valid)="trim,url"];
-  Phone numbers = 5;
+
+  repeated Address addresses = 5;
+  map<string, Phone> numbers = 6;
+
+  map<string, string> properties = 7;
 }
 
+
 message Phone {
-  string number = 1 [(valid)="trim,truncate(50),length(5|50)"]
+  string number = 1 [(valid)="trim,truncate(50),length(5|50)"];
+}
+
+message Address {
+  string address = 1 [(valid)="trim,truncate(50),length(0|512)"];
 }
 ```
 
@@ -50,18 +55,21 @@ becomes
 **user.pb.go**
 
 ```go
+// ...
 type User struct {
-  Name    string `protobuf:"bytes,1,opt,name=name" json:"name,omitempty"`
-  Age     int32  `protobuf:"varint,2,opt,name=age" json:"age,omitempty"`
-  Email   string `protobuf:"bytes,3,opt,name=email" json:"email,omitempty"`
-  Website string `protobuf:"bytes,4,opt,name=website" json:"website,omitempty"`
-  Numbers *Phone
+  Name       string            `protobuf:"bytes,1,opt,name=name" json:"name,omitempty"`
+  Age        int32             `protobuf:"varint,2,opt,name=age" json:"age,omitempty"`
+  Email      string            `protobuf:"bytes,3,opt,name=email" json:"email,omitempty"`
+  Website    string            `protobuf:"bytes,4,opt,name=website" json:"website,omitempty"`
+  Addresses  []*Address        `protobuf:"bytes,5,rep,name=addresses" json:"addresses,omitempty"`
+  Numbers    map[string]*Phone `protobuf:"bytes,6,rep,name=numbers" json:"numbers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+  Properties map[string]string `protobuf:"bytes,7,rep,name=properties" json:"properties,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 }
 
 func (m *User) Validate() (bool, error) {
   changed := false
 
-  // Email: trim,tolower,email
+  // email: trim,tolower,email
   _email := m.Email
 
   _email = strings.TrimSpace(_email)
@@ -69,25 +77,50 @@ func (m *User) Validate() (bool, error) {
   _email = strings.ToLower(_email)
 
   changed = changed || _email != m.Email
+  m.Email = _email
 
   emailEmailNegate := false
   if result := govalidator.IsEmail(_email); (!result && !emailEmailNegate) || (result && emailEmailNegate) {
     return _email != m.Email, fmt.Errorf("%s does not validate as %s", _email, "email")
   }
 
-  // Website: trim,url
+  // website: trim,url
   _website := m.Website
 
   _website = strings.TrimSpace(_website)
 
   changed = changed || _website != m.Website
+  m.Website = _website
 
   urlWebsiteNegate := false
   if result := govalidator.IsURL(_website); (!result && !urlWebsiteNegate) || (result && urlWebsiteNegate) {
     return _website != m.Website, fmt.Errorf("%s does not validate as %s", _website, "url")
   }
 
-  // Name: trim,truncate(256),length(3|256),alpha
+  // addresses:
+  for _, f := range m.Addresses {
+    if f != nil {
+      if change, err := f.Validate(); err != nil {
+        return change, err
+      } else if change {
+        changed = change
+      }
+    }
+  }
+
+  // numbers:
+  for _, f := range m.Numbers {
+    if f != nil {
+      if change, err := f.Validate(); err != nil {
+        return change, err
+      } else if change {
+        changed = change
+      }
+    }
+  }
+    // properties:
+
+  // name: trim,truncate(256),length(3|256),alpha
   _name := m.Name
 
   _name = strings.TrimSpace(_name)
@@ -97,12 +130,14 @@ func (m *User) Validate() (bool, error) {
     if len(runes) > l {
       return string(runes[:l])
     }
+    return s
   })(_name, 256)
 
   changed = changed || _name != m.Name
+  m.Name = _name
 
   lengthNameNegate := false
-  if result := govalidator.ByteLength(_name, 3, 256); (!result && !lengthNameNegate) || (result && lengthNameNegate) {
+  if result := govalidator.ByteLength(_name, "3", "256"); (!result && !lengthNameNegate) || (result && lengthNameNegate) {
     return _name != m.Name, fmt.Errorf("%s does not validate as %s", _name, "length(3|256)")
   }
 
@@ -110,25 +145,12 @@ func (m *User) Validate() (bool, error) {
   if result := govalidator.IsAlpha(_name); (!result && !alphaNameNegate) || (result && alphaNameNegate) {
     return _name != m.Name, fmt.Errorf("%s does not validate as %s", _name, "alpha")
   }
-  
-  // Number:
-  for _, v := m.numbers {
-    if change, err := v.Validate(); err != nil {
-      return change, err
-    } else if change {
-      changed = change
-    }
-  }
 
+  // age:
   return changed, nil
 }
 
-func (m *User) Reset()                    { *m = User{} }
-func (m *User) String() string            { return proto.CompactTextString(m) }
-func (*User) ProtoMessage()               {}
-func (*User) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{0} }
-
-// etc...
+// etc ...
 ```
 
 From that point, you can call `m.Validate()` to validate the your protobuf message before you use it.
@@ -150,6 +172,14 @@ From that point, you can call `m.Validate()` to validate the your protobuf messa
 
 
 
+
+**Notes**
+
+* This binary replaces the existing `protoc-gen-go` binary, install by running `go get -u github.com/watchly/protobuf/protoc-gen-go`
+* If people find it useful, I'll fork upstream properly and make a different binary in the future 😀
+
+
+
 ## Installation ##
 
 To use this software, you must:
@@ -162,7 +192,7 @@ To use this software, you must:
   for details or, if you are using gccgo, follow the instructions at
   https://golang.org/doc/install/gccgo
 - Grab the code from the repository and install the proto package.
-  The simplest way is to run ` `.
+  The simplest way is to run `go get -u github.com/watchly/protobuf/protoc-gen-go`.
   The compiler plugin, protoc-gen-go, will be installed in $GOBIN,
   defaulting to $GOPATH/bin.  It must be in your $PATH for the protocol
   compiler, protoc, to find it.
@@ -209,7 +239,7 @@ for a protocol buffer variable v:
 
 -   Names are turned from camel_case to CamelCase for export.
 -   There are no methods on v to set fields; just treat
-      	them as structure fields.
+        	them as structure fields.
     - There are getters that return a field's value if set,
       and return the field's default value if unset.
       The getters work even if the receiver is a nil message.
