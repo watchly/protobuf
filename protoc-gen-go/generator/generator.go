@@ -88,6 +88,10 @@ type Plugin interface {
 var plugins []Plugin
 
 var validatorTruncateMatch = regexp.MustCompile("^truncate\\((\\d+)\\)$")
+var validatorErrors = map[bool]string{
+	false: "%s does not validate as %s",
+	true:  "%s does validate as %s",
+}
 
 // RegisterPlugin installs a (second-order) plugin to be run when the Go output is generated.
 // It is typically called during initialization.
@@ -1625,44 +1629,102 @@ func (g *Generator) goValidTags(field *descriptor.FieldDescriptorProto) string {
 	return valid
 }
 
-func (g *Generator) pValidatorBlock(field, tags string) {
+func (g *Generator) pValidatorBlock(field *descriptor.FieldDescriptorProto, tags string) {
+
+	fieldName := CamelCase(*field.Name)
+
+	// Handle validating nested messages
+	if *field.Type == descriptor.FieldDescriptorProto_TYPE_MESSAGE {
+		// If it's a map, detect value is type message
+		desc := g.ObjectNamed(field.GetTypeName())
+		if d, ok := desc.(*Descriptor); ok && d.GetOptions().GetMapEntry() {
+			valField := d.Field[1]
+			if *valField.Type != descriptor.FieldDescriptorProto_TYPE_MESSAGE {
+				return
+			}
+		}
+
+		if *field.Label == descriptor.FieldDescriptorProto_LABEL_REPEATED {
+			g.P("for _, f := range m.", fieldName, " {")
+			g.In()
+			g.P("if f != nil {")
+			g.In()
+			g.P("if change, err := f.Validate(); err != nil {")
+			g.In()
+			g.P("return change, err")
+			g.Out()
+			g.P(" } else if change {")
+			g.In()
+			g.P("changed = change")
+			g.Out()
+			g.P("}")
+			g.Out()
+			g.P("}")
+			g.Out()
+			g.P("}")
+			return
+		}
+
+		g.P("if m.", fieldName, " != nil {")
+		g.In()
+		g.P("if change, err := m.", fieldName, ".Validate(); err != nil {")
+		g.In()
+		g.P("return change, err")
+		g.Out()
+		g.P(" } else if change {")
+		g.In()
+		g.P("changed = change")
+		g.Out()
+		g.P("}")
+		g.Out()
+		g.P("}")
+		return
+	}
+
+	// Ignore scalar arrays
+	if *field.Label == descriptor.FieldDescriptorProto_LABEL_REPEATED {
+		return
+	}
+
+	if strings.TrimSpace(tags) == "" {
+		return
+	}
+
 	validators := strings.Split(tags, ",")
 	if len(validators) == 0 {
 		return
 	}
 
-	errorStrings := map[bool]string{
-		false: "%s does not validate as %s",
-		true:  "%s does validate as %s",
-	}
-
-	localField := "_" + strings.ToLower(field)
-	g.P(localField, " := m.", field)
+	localfieldName := "_" + strings.ToLower(fieldName)
+	g.P(localfieldName, " := m.", fieldName)
 
 	var doneManipulating bool
 	for _, validator := range validators {
 		validator := strings.TrimSpace(validator)
+		if validator == "" {
+			continue
+		}
 
 		g.P("")
 
 		if validator == "trim" {
-			g.P(fmt.Sprintf("%s = strings.TrimSpace(%s)", localField, localField))
+			g.P(fmt.Sprintf("%s = strings.TrimSpace(%s)", localfieldName, localfieldName))
 			continue
 		}
 
 		if validator == "tolower" {
-			g.P(fmt.Sprintf("%s = strings.ToLower(%s)", localField, localField))
+			g.P(fmt.Sprintf("%s = strings.ToLower(%s)", localfieldName, localfieldName))
 			continue
 		}
 
 		if validator == "toupper" {
-			g.P(fmt.Sprintf("%s = strings.ToUpper(%s)", localField, localField))
+			g.P(fmt.Sprintf("%s = strings.ToUpper(%s)", localfieldName, localfieldName))
 		}
 
 		if matches := validatorTruncateMatch.FindStringSubmatch(validator); len(matches) > 0 {
-			g.P(localField, " = (func(s string, l int) string {")
+			g.P(localfieldName, " = (func(s string, l int) string {")
 			g.In()
-			g.P("runes := []rune(", localField, ")")
+			g.P("runes := []rune(", localfieldName, ")")
 			g.P("if len(runes) > l {")
 			g.In()
 			g.P("return string(runes[:l])")
@@ -1670,13 +1732,13 @@ func (g *Generator) pValidatorBlock(field, tags string) {
 			g.P("}")
 			g.P("return s")
 			g.Out()
-			g.P("})(", localField, ", ", matches[1], ")")
+			g.P("})(", localfieldName, ", ", matches[1], ")")
 			continue
 		}
 
 		if doneManipulating == false {
-			g.P("changed = changed || ", localField, " != m.", field)
-			g.P("m.", field, " = ", localField)
+			g.P("changed = changed || ", localfieldName, " != m.", fieldName)
+			g.P("m.", fieldName, " = ", localfieldName)
 			g.P()
 		}
 
@@ -1688,8 +1750,8 @@ func (g *Generator) pValidatorBlock(field, tags string) {
 			negate = true
 		}
 
-		negateField := strings.Split(validator, "(")[0] + field + "Negate"
-		g.P(negateField, " := ", negate)
+		negatefieldName := strings.Split(validator, "(")[0] + fieldName + "Negate"
+		g.P(negatefieldName, " := ", negate)
 
 		var methodCall string
 
@@ -1701,25 +1763,25 @@ func (g *Generator) pValidatorBlock(field, tags string) {
 
 			if validateFunc, ok := govalidator.ParamTagMap[key]; ok {
 				methodNames := strings.Split(runtime.FuncForPC(reflect.ValueOf(validateFunc).Pointer()).Name(), "/")
-				methodCall = fmt.Sprintf("%s(%s, \"%s\")", methodNames[len(methodNames)-1], localField, strings.Join(matches[1:], "\",\""))
+				methodCall = fmt.Sprintf("%s(%s, \"%s\")", methodNames[len(methodNames)-1], localfieldName, strings.Join(matches[1:], "\",\""))
 			}
 		}
 
 		if validateFunc, ok := govalidator.TagMap[validator]; ok && methodCall == "" {
 			methodNames := strings.Split(runtime.FuncForPC(reflect.ValueOf(validateFunc).Pointer()).Name(), "/")
-			methodCall = fmt.Sprintf("%s(%s)", methodNames[len(methodNames)-1], localField)
+			methodCall = fmt.Sprintf("%s(%s)", methodNames[len(methodNames)-1], localfieldName)
 		}
 
 		if methodCall == "" {
-			methodCall = fmt.Sprintf("VALIDATOR_%s_DOES_NOT_EXIST(%s)", validator, localField)
+			methodCall = fmt.Sprintf("VALIDATOR_%s_DOES_NOT_EXIST(%s)", validator, localfieldName)
 		}
 
 		g.P(fmt.Sprintf("if result := %s; (!result && !%s) || (result && %s) {",
 			methodCall,
-			negateField,
-			negateField))
+			negatefieldName,
+			negatefieldName))
 		g.In()
-		g.P("return ", localField, " != m.", field, `, fmt.Errorf("`, errorStrings[negate], `", `, localField, `, "`, validator, `")`)
+		g.P("return ", localfieldName, " != m.", fieldName, `, fmt.Errorf("`, validatorErrors[negate], `", `, localfieldName, `, "`, validator, `")`)
 		g.Out()
 		g.P("}")
 
@@ -1876,7 +1938,8 @@ func (g *Generator) generateMessage(message *Descriptor) {
 	oneofDisc := make(map[int32]string)                                // name of discriminator method
 	oneofTypeName := make(map[*descriptor.FieldDescriptorProto]string) // without star
 	oneofInsertPoints := make(map[int32]int)                           // oneof_index => offset of g.Buffer
-	fieldValidators := make(map[string]string)
+
+	fieldValidators := make(map[*descriptor.FieldDescriptorProto]string)
 
 	g.PrintComments(message.path)
 	g.P("type ", ccTypeName, " struct {")
@@ -1919,9 +1982,7 @@ func (g *Generator) generateMessage(message *Descriptor) {
 		fieldNames[field] = fieldName
 		fieldGetterNames[field] = fieldGetterName
 
-		if validators := g.goValidTags(field); validators != "" {
-			fieldValidators[fieldName] = validators
-		}
+		fieldValidators[field] = g.goValidTags(field)
 
 		oneof := field.OneofIndex != nil
 		if oneof && oneofFieldName[*field.OneofIndex] == "" {
@@ -2037,19 +2098,17 @@ func (g *Generator) generateMessage(message *Descriptor) {
 		g.Buffer.Write(rem)
 	}
 
-	if len(fieldValidators) > 0 {
-		g.P("func (m *", ccTypeName, ") Validate() (bool, error) { ")
-		g.In()
-		g.P("changed := false")
-		for field, tags := range fieldValidators {
-			g.P("")
-			g.P("// ", field, ": ", tags)
-			g.pValidatorBlock(field, tags)
-		}
-		g.P("return changed, nil")
-		g.Out()
-		g.P("}")
+	g.P("func (m *", ccTypeName, ") Validate() (bool, error) { ")
+	g.In()
+	g.P("changed := false")
+	for field, tags := range fieldValidators {
+		g.P("")
+		g.P("// ", *field.Name, ": ", tags)
+		g.pValidatorBlock(field, tags)
 	}
+	g.P("return changed, nil")
+	g.Out()
+	g.P("}")
 
 	// Reset, String and ProtoMessage methods.
 	g.P("func (m *", ccTypeName, ") Reset() { *m = ", ccTypeName, "{} }")

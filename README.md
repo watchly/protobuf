@@ -37,12 +37,17 @@ message User {
   int32  age     = 2;
   string email   = 3 [(valid)="trim,tolower,email"];
   string website = 4 [(valid)="trim,url"];
+  Phone numbers = 5;
+}
+
+message Phone {
+  string number = 1 [(valid)="trim,truncate(50),length(5|50)"]
 }
 ```
 
 becomes
 
-**user.pb.proto**
+**user.pb.go**
 
 ```go
 type User struct {
@@ -50,6 +55,7 @@ type User struct {
   Age     int32  `protobuf:"varint,2,opt,name=age" json:"age,omitempty"`
   Email   string `protobuf:"bytes,3,opt,name=email" json:"email,omitempty"`
   Website string `protobuf:"bytes,4,opt,name=website" json:"website,omitempty"`
+  Numbers *Phone
 }
 
 func (m *User) Validate() (bool, error) {
@@ -104,6 +110,15 @@ func (m *User) Validate() (bool, error) {
   if result := govalidator.IsAlpha(_name); (!result && !alphaNameNegate) || (result && alphaNameNegate) {
     return _name != m.Name, fmt.Errorf("%s does not validate as %s", _name, "alpha")
   }
+  
+  // Number:
+  for _, v := m.numbers {
+    if change, err := v.Validate(); err != nil {
+      return change, err
+    } else if change {
+      changed = change
+    }
+  }
 
   return changed, nil
 }
@@ -130,6 +145,7 @@ From that point, you can call `m.Validate()` to validate the your protobuf messa
   * Santizers can be **chained** and should be placed before the validators:
     * `trim,truncate(255),tolower,email`
 * Negated validators are supported: `host,!url` would confirm the input is a host but not a url
+* **Deep validation of nested structs, maps & arrays**: calling `.Validate()` on the main type will validate all instances of a `message` nested inside of it, such as direct nesting, a map, or a slice
 * **No reflection is used**, as you can from the example above, the validation functions are called directly
 
 
@@ -193,7 +209,7 @@ for a protocol buffer variable v:
 
 -   Names are turned from camel_case to CamelCase for export.
 -   There are no methods on v to set fields; just treat
-    	them as structure fields.
+      	them as structure fields.
     - There are getters that return a field's value if set,
       and return the field's default value if unset.
       The getters work even if the receiver is a nil message.
