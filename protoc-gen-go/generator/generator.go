@@ -47,6 +47,9 @@ import (
 	"log"
 	"os"
 	"path"
+	"reflect"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
@@ -56,6 +59,8 @@ import (
 
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	plugin "github.com/golang/protobuf/protoc-gen-go/plugin"
+
+	"github.com/asaskevich/govalidator"
 )
 
 // generatedCodeVersion indicates a version of the generated code.
@@ -81,6 +86,8 @@ type Plugin interface {
 }
 
 var plugins []Plugin
+
+var validatorTruncateMatch = regexp.MustCompile("^truncate\\((\\d+)\\)$")
 
 // RegisterPlugin installs a (second-order) plugin to be run when the Go output is generated.
 // It is typically called during initialization.
@@ -1325,6 +1332,8 @@ func (g *Generator) generateImports() {
 	g.P("import " + g.Pkg["proto"] + " " + strconv.Quote(g.ImportPrefix+"github.com/golang/protobuf/proto"))
 	g.P("import " + g.Pkg["fmt"] + ` "fmt"`)
 	g.P("import " + g.Pkg["math"] + ` "math"`)
+	g.P("import " + g.Pkg["strings"] + ` "strings"`)
+	g.P(`import "github.com/asaskevich/govalidator"`)
 	for i, s := range g.file.Dependency {
 		fd := g.fileByName(s)
 		// Do not import our own package.
@@ -1350,6 +1359,9 @@ func (g *Generator) generateImports() {
 		if _, ok := g.usedPackages[pname]; !ok {
 			pname = "_"
 		}
+		if pname == "google_protobuf" {
+			importPath = "github.com/golang/protobuf/protoc-gen-go/descriptor"
+		}
 		g.P("import ", pname, " ", strconv.Quote(importPath))
 	}
 	g.P()
@@ -1362,6 +1374,8 @@ func (g *Generator) generateImports() {
 	g.P("var _ = ", g.Pkg["proto"], ".Marshal")
 	g.P("var _ = ", g.Pkg["fmt"], ".Errorf")
 	g.P("var _ = ", g.Pkg["math"], ".Inf")
+	g.P("var _ = strings.Trim")
+	g.P("var _ = govalidator.IsInt")
 	g.P()
 }
 
@@ -1599,12 +1613,118 @@ func (g *Generator) goTag(message *Descriptor, field *descriptor.FieldDescriptor
 		defaultValue))
 }
 
-func (g *Generator) goValidTag(field *descriptor.FieldDescriptorProto) string {
+func (g *Generator) goValidTags(field *descriptor.FieldDescriptorProto) string {
 	valid := ""
 	if field.Options != nil && strings.HasPrefix(field.Options.String(), "71111:") {
-		valid = "valid:" + strings.TrimSpace(field.Options.String())[6:]
+		val := strings.TrimSpace(field.Options.String())
+		vlen := len(val)
+		if vlen > 7 {
+			valid = val[7 : vlen-1]
+		}
 	}
 	return valid
+}
+
+func (g *Generator) pValidatorBlock(field, tags string) {
+	validators := strings.Split(tags, ",")
+	if len(validators) == 0 {
+		return
+	}
+
+	errorStrings := map[bool]string{
+		false: "%s does not validate as %s",
+		true:  "%s does validate as %s",
+	}
+
+	localField := "_" + strings.ToLower(field)
+	g.P(localField, " := m.", field)
+
+	var doneManipulating bool
+	for _, validator := range validators {
+		validator := strings.TrimSpace(validator)
+
+		g.P("")
+
+		if validator == "trim" {
+			g.P(fmt.Sprintf("%s = strings.TrimSpace(%s)", localField, localField))
+			continue
+		}
+
+		if validator == "tolower" {
+			g.P(fmt.Sprintf("%s = strings.ToLower(%s)", localField, localField))
+			continue
+		}
+
+		if validator == "toupper" {
+			g.P(fmt.Sprintf("%s = strings.ToUpper(%s)", localField, localField))
+		}
+
+		if matches := validatorTruncateMatch.FindStringSubmatch(validator); len(matches) > 0 {
+			g.P(localField, " = (func(s string, l int) string {")
+			g.In()
+			g.P("runes := []rune(", localField, ")")
+			g.P("if len(runes) > l {")
+			g.In()
+			g.P("return string(runes[:l])")
+			g.Out()
+			g.P("}")
+			g.P("return s")
+			g.Out()
+			g.P("})(", localField, ", ", matches[1], ")")
+			continue
+		}
+
+		if doneManipulating == false {
+			g.P("changed = changed || ", localField, " != m.", field)
+			g.P("m.", field, " = ", localField)
+			g.P()
+		}
+
+		doneManipulating = true
+
+		var negate bool
+		if validator[0] == '!' {
+			validator = validator[1:]
+			negate = true
+		}
+
+		negateField := strings.Split(validator, "(")[0] + field + "Negate"
+		g.P(negateField, " := ", negate)
+
+		var methodCall string
+
+		for key, value := range govalidator.ParamTagRegexMap {
+			matches := value.FindStringSubmatch(validator)
+			if len(matches) < 1 {
+				continue
+			}
+
+			if validateFunc, ok := govalidator.ParamTagMap[key]; ok {
+				methodNames := strings.Split(runtime.FuncForPC(reflect.ValueOf(validateFunc).Pointer()).Name(), "/")
+				methodCall = fmt.Sprintf("%s(%s, \"%s\")", methodNames[len(methodNames)-1], localField, strings.Join(matches[1:], "\",\""))
+			}
+		}
+
+		if validateFunc, ok := govalidator.TagMap[validator]; ok && methodCall == "" {
+			methodNames := strings.Split(runtime.FuncForPC(reflect.ValueOf(validateFunc).Pointer()).Name(), "/")
+			methodCall = fmt.Sprintf("%s(%s)", methodNames[len(methodNames)-1], localField)
+		}
+
+		if methodCall == "" {
+			methodCall = fmt.Sprintf("VALIDATOR_%s_DOES_NOT_EXIST(%s)", validator, localField)
+		}
+
+		g.P(fmt.Sprintf("if result := %s; (!result && !%s) || (result && %s) {",
+			methodCall,
+			negateField,
+			negateField))
+		g.In()
+		g.P("return ", localField, " != m.", field, `, fmt.Errorf("`, errorStrings[negate], `", `, localField, `, "`, validator, `")`)
+		g.Out()
+		g.P("}")
+
+		g.P()
+	}
 }
 
 func needsStar(typ descriptor.FieldDescriptorProto_Type) bool {
@@ -1756,6 +1876,7 @@ func (g *Generator) generateMessage(message *Descriptor) {
 	oneofDisc := make(map[int32]string)                                // name of discriminator method
 	oneofTypeName := make(map[*descriptor.FieldDescriptorProto]string) // without star
 	oneofInsertPoints := make(map[int32]int)                           // oneof_index => offset of g.Buffer
+	fieldValidators := make(map[string]string)
 
 	g.PrintComments(message.path)
 	g.P("type ", ccTypeName, " struct {")
@@ -1793,10 +1914,14 @@ func (g *Generator) generateMessage(message *Descriptor) {
 		fieldName, fieldGetterName := ns[0], ns[1]
 		typename, wiretype := g.GoType(message, field)
 		jsonName := *field.Name
-		tag := fmt.Sprintf("protobuf:%s %s json:%q", g.goTag(message, field, wiretype), g.goValidTag(field), jsonName+",omitempty")
+		tag := fmt.Sprintf("protobuf:%s json:%q", g.goTag(message, field, wiretype), jsonName+",omitempty")
 
 		fieldNames[field] = fieldName
 		fieldGetterNames[field] = fieldGetterName
+
+		if validators := g.goValidTags(field); validators != "" {
+			fieldValidators[fieldName] = validators
+		}
 
 		oneof := field.OneofIndex != nil
 		if oneof && oneofFieldName[*field.OneofIndex] == "" {
@@ -1910,6 +2035,20 @@ func (g *Generator) generateMessage(message *Descriptor) {
 			g.P("//\t*", oneofTypeName[field])
 		}
 		g.Buffer.Write(rem)
+	}
+
+	if len(fieldValidators) > 0 {
+		g.P("func (m *", ccTypeName, ") Validate() (bool, error) { ")
+		g.In()
+		g.P("changed := false")
+		for field, tags := range fieldValidators {
+			g.P("")
+			g.P("// ", field, ": ", tags)
+			g.pValidatorBlock(field, tags)
+		}
+		g.P("return changed, nil")
+		g.Out()
+		g.P("}")
 	}
 
 	// Reset, String and ProtoMessage methods.

@@ -10,19 +10,143 @@ This software implements Go bindings for protocol buffers.  For
 information about protocol buffers themselves, see
 	https://developers.google.com/protocol-buffers/
 
+
+## Govalidate Support Notes
+
+This fork of `github.com/golang/protobuf` adds support for `govalidate` based validation to protobuf output files. It does this by (ab)using the `extend` functionality of protobuf to let you define a new field that is then plucked out and a `Validate()` function written. For example:
+
+
+
+**user.proto**
+
+```proto
+syntax = "proto3";
+
+import "google/protobuf/descriptor.proto";
+
+package foo;
+
+// Unfortunately this is required in your proto files, though
+// it can be imported from a shared.proto or similar
+extend google.protobuf.FieldOptions {
+  string valid = 71111; // Don't change this
+}
+
+message User {
+  string name    = 1 [(valid)="trim,truncate(50),length(3|256),alpha"];
+  int32  age     = 2;
+  string email   = 3 [(valid)="trim,tolower,email"];
+  string website = 4 [(valid)="trim,url"];
+}
+```
+
+becomes
+
+**user.pb.proto**
+
+```go
+type User struct {
+  Name    string `protobuf:"bytes,1,opt,name=name" json:"name,omitempty"`
+  Age     int32  `protobuf:"varint,2,opt,name=age" json:"age,omitempty"`
+  Email   string `protobuf:"bytes,3,opt,name=email" json:"email,omitempty"`
+  Website string `protobuf:"bytes,4,opt,name=website" json:"website,omitempty"`
+}
+
+func (m *User) Validate() (bool, error) {
+  changed := false
+
+  // Email: trim,tolower,email
+  _email := m.Email
+
+  _email = strings.TrimSpace(_email)
+
+  _email = strings.ToLower(_email)
+
+  changed = changed || _email != m.Email
+
+  emailEmailNegate := false
+  if result := govalidator.IsEmail(_email); (!result && !emailEmailNegate) || (result && emailEmailNegate) {
+    return _email != m.Email, fmt.Errorf("%s does not validate as %s", _email, "email")
+  }
+
+  // Website: trim,url
+  _website := m.Website
+
+  _website = strings.TrimSpace(_website)
+
+  changed = changed || _website != m.Website
+
+  urlWebsiteNegate := false
+  if result := govalidator.IsURL(_website); (!result && !urlWebsiteNegate) || (result && urlWebsiteNegate) {
+    return _website != m.Website, fmt.Errorf("%s does not validate as %s", _website, "url")
+  }
+
+  // Name: trim,truncate(256),length(3|256),alpha
+  _name := m.Name
+
+  _name = strings.TrimSpace(_name)
+
+  _name = (func(s string, l int) string {
+    runes := []rune(_name)
+    if len(runes) > l {
+      return string(runes[:l])
+    }
+  })(_name, 256)
+
+  changed = changed || _name != m.Name
+
+  lengthNameNegate := false
+  if result := govalidator.ByteLength(_name, 3, 256); (!result && !lengthNameNegate) || (result && lengthNameNegate) {
+    return _name != m.Name, fmt.Errorf("%s does not validate as %s", _name, "length(3|256)")
+  }
+
+  alphaNameNegate := false
+  if result := govalidator.IsAlpha(_name); (!result && !alphaNameNegate) || (result && alphaNameNegate) {
+    return _name != m.Name, fmt.Errorf("%s does not validate as %s", _name, "alpha")
+  }
+
+  return changed, nil
+}
+
+func (m *User) Reset()                    { *m = User{} }
+func (m *User) String() string            { return proto.CompactTextString(m) }
+func (*User) ProtoMessage()               {}
+func (*User) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{0} }
+
+// etc...
+```
+
+From that point, you can call `m.Validate()` to validate the your protobuf message before you use it.
+
+
+
+**Features:**
+
+* All tag-based validators (including param validators) are supported from https://github.com/asaskevich/govalidator
+* **string santization** is supported with the following in-built sanitizers:
+  * `trim`: trims leading and trailing whitespace
+  * `truncate(n)`: truncates the *runes* of a string to `n` length
+  * `tolower` and `toupper`: exactly as you'd expect
+  * Santizers can be **chained** and should be placed before the validators:
+    * `trim,truncate(255),tolower,email`
+* Negated validators are supported: `host,!url` would confirm the input is a host but not a url
+* **No reflection is used**, as you can from the example above, the validation functions are called directly
+
+
+
 ## Installation ##
 
 To use this software, you must:
 - Install the standard C++ implementation of protocol buffers from
-	https://developers.google.com/protocol-buffers/
+  https://developers.google.com/protocol-buffers/
 - Of course, install the Go compiler and tools from
-	https://golang.org/
+  https://golang.org/
   See
-	https://golang.org/doc/install
+  https://golang.org/doc/install
   for details or, if you are using gccgo, follow the instructions at
-	https://golang.org/doc/install/gccgo
+  https://golang.org/doc/install/gccgo
 - Grab the code from the repository and install the proto package.
-  The simplest way is to run `go get -u github.com/golang/protobuf/{proto,protoc-gen-go}`.
+  The simplest way is to run ` `.
   The compiler plugin, protoc-gen-go, will be installed in $GOBIN,
   defaulting to $GOPATH/bin.  It must be in your $PATH for the protocol
   compiler, protoc, to find it.
@@ -67,53 +191,53 @@ Go source code generated for .proto files by the protocol compiler.
 A summary of the properties of the protocol buffer interface
 for a protocol buffer variable v:
 
-  - Names are turned from camel_case to CamelCase for export.
-  - There are no methods on v to set fields; just treat
-  	them as structure fields.
-  - There are getters that return a field's value if set,
-	and return the field's default value if unset.
-	The getters work even if the receiver is a nil message.
-  - The zero value for a struct is its correct initialization state.
-	All desired fields must be set before marshaling.
-  - A Reset() method will restore a protobuf struct to its zero state.
-  - Non-repeated fields are pointers to the values; nil means unset.
-	That is, optional or required field int32 f becomes F *int32.
-  - Repeated fields are slices.
-  - Helper functions are available to aid the setting of fields.
-	Helpers for getting values are superseded by the
-	GetFoo methods and their use is deprecated.
-		msg.Foo = proto.String("hello") // set field
-  - Constants are defined to hold the default values of all fields that
-	have them.  They have the form Default_StructName_FieldName.
-	Because the getter methods handle defaulted values,
-	direct use of these constants should be rare.
-  - Enums are given type names and maps from names to values.
-	Enum values are prefixed with the enum's type name. Enum types have
-	a String method, and a Enum method to assist in message construction.
-  - Nested groups and enums have type names prefixed with the name of
-  	the surrounding message type.
-  - Extensions are given descriptor names that start with E_,
-	followed by an underscore-delimited list of the nested messages
-	that contain it (if any) followed by the CamelCased name of the
-	extension field itself.  HasExtension, ClearExtension, GetExtension
-	and SetExtension are functions for manipulating extensions.
-  - Oneof field sets are given a single field in their message,
-	with distinguished wrapper types for each possible field value.
-  - Marshal and Unmarshal are functions to encode and decode the wire format.
+-   Names are turned from camel_case to CamelCase for export.
+-   There are no methods on v to set fields; just treat
+    	them as structure fields.
+    - There are getters that return a field's value if set,
+      and return the field's default value if unset.
+      The getters work even if the receiver is a nil message.
+    - The zero value for a struct is its correct initialization state.
+      All desired fields must be set before marshaling.
+    - A Reset() method will restore a protobuf struct to its zero state.
+    - Non-repeated fields are pointers to the values; nil means unset.
+      That is, optional or required field int32 f becomes F *int32.
+    - Repeated fields are slices.
+    - Helper functions are available to aid the setting of fields.
+      Helpers for getting values are superseded by the
+      GetFoo methods and their use is deprecated.
+      msg.Foo = proto.String("hello") // set field
+    - Constants are defined to hold the default values of all fields that
+      have them.  They have the form Default_StructName_FieldName.
+      Because the getter methods handle defaulted values,
+      direct use of these constants should be rare.
+    - Enums are given type names and maps from names to values.
+      Enum values are prefixed with the enum's type name. Enum types have
+      a String method, and a Enum method to assist in message construction.
+    - Nested groups and enums have type names prefixed with the name of
+      the surrounding message type.
+    - Extensions are given descriptor names that start with E_,
+      followed by an underscore-delimited list of the nested messages
+      that contain it (if any) followed by the CamelCased name of the
+      extension field itself.  HasExtension, ClearExtension, GetExtension
+      and SetExtension are functions for manipulating extensions.
+    - Oneof field sets are given a single field in their message,
+      with distinguished wrapper types for each possible field value.
+    - Marshal and Unmarshal are functions to encode and decode the wire format.
 
 When the .proto file specifies `syntax="proto3"`, there are some differences:
 
-  - Non-repeated fields of non-message type are values instead of pointers.
-  - Getters are only generated for message and oneof fields.
-  - Enum types do not get an Enum method.
+- Non-repeated fields of non-message type are values instead of pointers.
+- Getters are only generated for message and oneof fields.
+    - Enum types do not get an Enum method.
 
 Consider file test.proto, containing
 
 ```proto
 	package example;
-	
+
 	enum FOO { X = 17; };
-	
+
 	message Test {
 	  required string label = 1;
 	  optional int32 type = 2 [default=77];
