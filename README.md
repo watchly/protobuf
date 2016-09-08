@@ -22,8 +22,12 @@ syntax = "proto3";
 
 package user;
 
+// Required for the FieldOptions block below
 import "google/protobuf/descriptor.proto";
 
+// Annoying but required. You can push this out to a
+// shared.proto and import it in every file you wish
+// to have validation in
 extend google.protobuf.FieldOptions {
   string valid = 71111;
 }
@@ -239,7 +243,7 @@ for a protocol buffer variable v:
 
 -   Names are turned from camel_case to CamelCase for export.
 -   There are no methods on v to set fields; just treat
-        	them as structure fields.
+          	them as structure fields.
     - There are getters that return a field's value if set,
       and return the field's default value if unset.
       The getters work even if the receiver is a nil message.
