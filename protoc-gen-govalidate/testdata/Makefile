@@ -59,6 +59,8 @@ testbuild:	regenerate
 regenerate:
 	# Invoke protoc once to generate three independent .pb.go files in the same package.
 	protoc --govalidate_out=. multi/multi{1,2,3}.proto
+	protoc --govalidate_out=. validator/validator.proto
+
 
 #extension_test:	extension_test.$O
 #	$(LD) -L. -o $@ $<

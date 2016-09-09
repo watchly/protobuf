@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package user;
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.FieldOptions {
+  string valid = 71111;
+}
+
+message Name {
+  string name = 1 [(valid)="trim,truncate(256),length(3|256),alpha"];
+}
+
+message Tags {
+  map<string, string> tags = 1 [(valid)="[trim,truncate(5)]omitempty,trim,truncate(5)"];
+}
+
+message User {
+  string name    = 1 [(valid)="trim,truncate(256),length(3|256),alpha"];
+  int32  age     = 2 [(valid)="min(0),max(120)"];
+  string email   = 3 [(valid)="trim,tolower,email"];
+  string website = 4 [(valid)="trim,url"];
+
+  double rating  = 5 [(valid)="min(0.0),max(1.0)"];
+  float  average = 6 [(valid)="min(0.0),max(1.0)"];
+  float  stars   = 7 [(valid)="floor,min(0.0),max(5.0)"];
+
+  // Will remove empty strings from the array, and then will
+  // run what's left through trim,truncate,... and replace
+  // those that change in the array
+  repeated string tags = 8 [(valid)="omitempty,trim,truncate(50),alpha"];
+
+  repeated Address addresses = 10;  // Will call .Validate() on each Address in addresses
+  map<string, Phone> numbers = 11;  // Will call .Validate() on each Phone value automatically
+
+  // types in maps are also supported, santization functions like trim & truncate
+  // will update the map's key or value if there were changes
+  // omitempty will rid the map of any keys who's string values are empty
+  map<string, string> properties = 12 [(valid)="[trim,truncate(50)]omitempty,trim,truncate(255)"];
+}
+
+message Phone {
+  string number = 1 [(valid)="trim,truncate(50),length(5|50)"];
+}
+
+message Address {
+  string address = 1 [(valid)="trim,truncate(50),length(0|512)"];
+}

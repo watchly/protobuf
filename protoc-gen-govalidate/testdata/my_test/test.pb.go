@@ -203,16 +203,6 @@ type Request struct {
 func (m *Request) Validate() (bool, error) {
 	changed := false
 	// map validation k: v:
-	for k, v := range m.NameMapping {
-		localK := k
-		localV := v
-
-		if k != localK || v != localV {
-			delete(m.NameMapping, k)
-			m.NameMapping[localK] = localV
-		}
-	}
-	// map validation k: v:
 	for k, v := range m.MsgMapping {
 		localK := k
 		localV := v
@@ -229,6 +219,16 @@ func (m *Request) Validate() (bool, error) {
 		if k != localK || v != localV {
 			delete(m.MsgMapping, k)
 			m.MsgMapping[localK] = localV
+		}
+	}
+	// map validation k: v:
+	for k, v := range m.NameMapping {
+		localK := k
+		localV := v
+
+		if k != localK || v != localV {
+			delete(m.NameMapping, k)
+			m.NameMapping[localK] = localV
 		}
 	}
 	return changed, nil

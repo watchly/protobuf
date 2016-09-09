@@ -13,4 +13,5 @@ _obj
 _test
 _testmain.go
 protoc-gen-govalidate/testdata/multi/*.pb.go
+protoc-gen-govalidate/testdata/validator/*pb.go
 _conformance/_conformance

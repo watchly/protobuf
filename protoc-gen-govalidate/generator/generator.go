@@ -50,6 +50,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -2342,9 +2343,19 @@ func (g *Generator) generateMessage(message *Descriptor) {
 	g.P("func (m *", ccTypeName, ") Validate() (bool, error) { ")
 	g.In()
 	g.P("changed := false")
-	for field, tags := range fieldValidators {
-		g.pValidatorBlock(field, tags)
+
+	vfields := map[string]*descriptor.FieldDescriptorProto{}
+	vkeys := []string{}
+	for f, _ := range fieldValidators {
+		vfields[f.GetName()] = f
+		vkeys = append(vkeys, f.GetName())
 	}
+	sort.Strings(vkeys)
+	for _, fieldName := range vkeys {
+		field := vfields[fieldName]
+		g.pValidatorBlock(field, fieldValidators[field])
+	}
+
 	g.P("return changed, nil")
 	g.Out()
 	g.P("}")
