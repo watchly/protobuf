@@ -92,6 +92,12 @@ var validatorErrors = map[bool]string{
 	false: "%s does not validate as %s",
 	true:  "%s does validate as %s",
 }
+var validatorFloatFuncs = map[string]*regexp.Regexp{
+	"Ceil":  regexp.MustCompile("^ceil$"),
+	"Floor": regexp.MustCompile("^floor$"),
+	"Min":   regexp.MustCompile("^min\\(([-+]?\\d*\\.\\d+|\\d+)\\)"),
+	"Max":   regexp.MustCompile("^max\\(([-+]?\\d*\\.\\d+|\\d+)\\)"),
+}
 
 // RegisterPlugin installs a (second-order) plugin to be run when the Go output is generated.
 // It is typically called during initialization.
@@ -1666,6 +1672,7 @@ func (g *Generator) pValidatorMessageBlock(field *descriptor.FieldDescriptorProt
 		return
 	}
 
+	// otherwise just check the field directly
 	g.P("if m.", fieldName, " != nil {")
 	g.In()
 	g.P("if change, err := m.", fieldName, ".Validate(); err != nil {")
@@ -1679,6 +1686,35 @@ func (g *Generator) pValidatorMessageBlock(field *descriptor.FieldDescriptorProt
 	g.P("}")
 	g.Out()
 	g.P("}")
+}
+
+func (g *Generator) pValidatorFloatBlock(fieldName, localfieldName string, validators []string) {
+
+	for _, validator := range validators {
+		validator = strings.TrimSpace(validator)
+
+		for key, value := range validatorFloatFuncs {
+			matches := value.FindStringSubmatch(validator)
+			l := len(matches)
+
+			if l < 1 {
+				continue
+			} else if l == 1 {
+				g.P(localfieldName, " = math.", key, "(", localfieldName, ")")
+			} else {
+				g.P(localfieldName, " = math.", key, "(", localfieldName, ", ", matches[1], ")")
+			}
+		}
+	}
+}
+
+func (g *Generator) pValidatorFloat32Block(fieldName, localFieldName string, validators []string) {
+	castedFieldName := localFieldName + "Casted"
+	g.P(castedFieldName, " := ", "float64(", localFieldName, ")")
+
+	g.pValidatorFloatBlock(fieldName, castedFieldName, validators)
+
+	g.P(localFieldName, " = float32(", castedFieldName, ")")
 }
 
 func (g *Generator) pValidatorBlock(field *descriptor.FieldDescriptorProto, tags string) {
@@ -1705,6 +1741,25 @@ func (g *Generator) pValidatorBlock(field *descriptor.FieldDescriptorProto, tags
 
 	localfieldName := "_" + strings.ToLower(fieldName)
 	g.P(localfieldName, " := m.", fieldName)
+
+	if *field.Type == descriptor.FieldDescriptorProto_TYPE_DOUBLE {
+		g.pValidatorFloatBlock(fieldName, localfieldName, validators)
+		g.P("changed = changed || ", localfieldName, " != m.", fieldName)
+		g.P("m.", fieldName, " = ", localfieldName)
+		g.P()
+		return
+	}
+
+	if *field.Type == descriptor.FieldDescriptorProto_TYPE_FLOAT {
+		g.pValidatorFloat32Block(fieldName, localfieldName, validators)
+		g.P("changed = changed || ", localfieldName, " != m.", fieldName)
+		g.P("m.", fieldName, " = ", localfieldName)
+		g.P()
+	}
+
+	if *field.Type != descriptor.FieldDescriptorProto_TYPE_STRING {
+		return
+	}
 
 	var doneManipulating bool
 	for _, validator := range validators {
