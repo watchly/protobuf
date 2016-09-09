@@ -24,12 +24,16 @@ package my_test
 import proto "github.com/watchly/protobuf/proto"
 import fmt "fmt"
 import math "math"
+import "strings"
+import "github.com/asaskevich/govalidator"
 import _ "github.com/watchly/protobuf/protoc-gen-govalidate/testdata/multi"
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
 var _ = fmt.Errorf
 var _ = math.Inf
+var _ = strings.Trim
+var _ = govalidator.IsInt
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the proto package it is being compiled against.
@@ -196,6 +200,39 @@ type Request struct {
 	XXX_unrecognized []byte  `json:"-"`
 }
 
+func (m *Request) Validate() (bool, error) {
+	changed := false
+	// map validation k: v:
+	for k, v := range m.NameMapping {
+		localK := k
+		localV := v
+
+		if k != localK || v != localV {
+			delete(m.NameMapping, k)
+			m.NameMapping[localK] = localV
+		}
+	}
+	// map validation k: v:
+	for k, v := range m.MsgMapping {
+		localK := k
+		localV := v
+
+		// validate message. use `ignore` to suppress this validation
+		if v != nil {
+			if change, err := v.Validate(); err != nil {
+				return change, err
+			} else if change {
+				changed = change
+			}
+		}
+
+		if k != localK || v != localV {
+			delete(m.MsgMapping, k)
+			m.MsgMapping[localK] = localV
+		}
+	}
+	return changed, nil
+}
 func (m *Request) Reset()         { *m = Request{} }
 func (m *Request) String() string { return proto.CompactTextString(m) }
 func (*Request) ProtoMessage()    {}
@@ -272,6 +309,10 @@ type Request_SomeGroup struct {
 	XXX_unrecognized []byte `json:"-"`
 }
 
+func (m *Request_SomeGroup) Validate() (bool, error) {
+	changed := false
+	return changed, nil
+}
 func (m *Request_SomeGroup) Reset()         { *m = Request_SomeGroup{} }
 func (m *Request_SomeGroup) String() string { return proto.CompactTextString(m) }
 func (*Request_SomeGroup) ProtoMessage()    {}
@@ -290,6 +331,19 @@ type Reply struct {
 	XXX_unrecognized             []byte `json:"-"`
 }
 
+func (m *Reply) Validate() (bool, error) {
+	changed := false
+	for _, f := range m.Found {
+		if f != nil {
+			if change, err := f.Validate(); err != nil {
+				return change, err
+			} else if change {
+				changed = change
+			}
+		}
+	}
+	return changed, nil
+}
 func (m *Reply) Reset()         { *m = Reply{} }
 func (m *Reply) String() string { return proto.CompactTextString(m) }
 func (*Reply) ProtoMessage()    {}
@@ -323,6 +377,10 @@ type Reply_Entry struct {
 	XXX_unrecognized              []byte `json:"-"`
 }
 
+func (m *Reply_Entry) Validate() (bool, error) {
+	changed := false
+	return changed, nil
+}
 func (m *Reply_Entry) Reset()         { *m = Reply_Entry{} }
 func (m *Reply_Entry) String() string { return proto.CompactTextString(m) }
 func (*Reply_Entry) ProtoMessage()    {}
@@ -356,6 +414,10 @@ type OtherBase struct {
 	XXX_unrecognized             []byte `json:"-"`
 }
 
+func (m *OtherBase) Validate() (bool, error) {
+	changed := false
+	return changed, nil
+}
 func (m *OtherBase) Reset()         { *m = OtherBase{} }
 func (m *OtherBase) String() string { return proto.CompactTextString(m) }
 func (*OtherBase) ProtoMessage()    {}
@@ -379,6 +441,10 @@ type ReplyExtensions struct {
 	XXX_unrecognized []byte `json:"-"`
 }
 
+func (m *ReplyExtensions) Validate() (bool, error) {
+	changed := false
+	return changed, nil
+}
 func (m *ReplyExtensions) Reset()         { *m = ReplyExtensions{} }
 func (m *ReplyExtensions) String() string { return proto.CompactTextString(m) }
 func (*ReplyExtensions) ProtoMessage()    {}
@@ -412,6 +478,10 @@ type OtherReplyExtensions struct {
 	XXX_unrecognized []byte `json:"-"`
 }
 
+func (m *OtherReplyExtensions) Validate() (bool, error) {
+	changed := false
+	return changed, nil
+}
 func (m *OtherReplyExtensions) Reset()         { *m = OtherReplyExtensions{} }
 func (m *OtherReplyExtensions) String() string { return proto.CompactTextString(m) }
 func (*OtherReplyExtensions) ProtoMessage()    {}
@@ -428,6 +498,10 @@ type OldReply struct {
 	XXX_unrecognized             []byte `json:"-"`
 }
 
+func (m *OldReply) Validate() (bool, error) {
+	changed := false
+	return changed, nil
+}
 func (m *OldReply) Reset()         { *m = OldReply{} }
 func (m *OldReply) String() string { return proto.CompactTextString(m) }
 func (*OldReply) ProtoMessage()    {}
@@ -476,6 +550,10 @@ type Communique struct {
 	XXX_unrecognized []byte             `json:"-"`
 }
 
+func (m *Communique) Validate() (bool, error) {
+	changed := false
+	return changed, nil
+}
 func (m *Communique) Reset()         { *m = Communique{} }
 func (m *Communique) String() string { return proto.CompactTextString(m) }
 func (*Communique) ProtoMessage()    {}
@@ -807,6 +885,10 @@ type Communique_SomeGroup struct {
 	XXX_unrecognized []byte  `json:"-"`
 }
 
+func (m *Communique_SomeGroup) Validate() (bool, error) {
+	changed := false
+	return changed, nil
+}
 func (m *Communique_SomeGroup) Reset()         { *m = Communique_SomeGroup{} }
 func (m *Communique_SomeGroup) String() string { return proto.CompactTextString(m) }
 func (*Communique_SomeGroup) ProtoMessage()    {}
@@ -822,6 +904,10 @@ type Communique_Delta struct {
 	XXX_unrecognized []byte `json:"-"`
 }
 
+func (m *Communique_Delta) Validate() (bool, error) {
+	changed := false
+	return changed, nil
+}
 func (m *Communique_Delta) Reset()         { *m = Communique_Delta{} }
 func (m *Communique_Delta) String() string { return proto.CompactTextString(m) }
 func (*Communique_Delta) ProtoMessage()    {}

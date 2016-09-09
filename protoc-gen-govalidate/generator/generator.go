@@ -1737,19 +1737,6 @@ func (g *Generator) pValidatorMapBlock(field *descriptor.FieldDescriptorProto, d
 	kvalidators := strings.Split(keyTags, ",")
 	vvalidators := strings.Split(valTags, ",")
 
-	g.P("// map validation k:", keyTags, " v: ", valTags)
-
-	g.P("for k, v := range m.", fieldName, " {")
-	g.In()
-	g.P("localK := k")
-	g.P("localV := v")
-
-	valKey, valValue := d.Field[0], d.Field[1]
-
-	if len(kvalidators) > 0 {
-		g.pValidatorTypeBlock(valKey, "k", "localK", kvalidators)
-	}
-
 	var shouldOmitEmpty bool
 	for i, validator := range vvalidators {
 		if strings.TrimSpace(validator) == "omitempty" {
@@ -1757,6 +1744,23 @@ func (g *Generator) pValidatorMapBlock(field *descriptor.FieldDescriptorProto, d
 			vvalidators = append(vvalidators[:i], vvalidators[i+1:]...)
 			break
 		}
+	}
+
+	valKey, valValue := d.Field[0], d.Field[1]
+
+	if len(kvalidators) == 0 && len(vvalidators) == 0 && !shouldOmitEmpty && *valValue.Type != descriptor.FieldDescriptorProto_TYPE_MESSAGE {
+		return
+	}
+
+	g.P("// map validation k:", keyTags, " v: ", valTags)
+
+	g.P("for k, v := range m.", fieldName, " {")
+	g.In()
+	g.P("localK := k")
+	g.P("localV := v")
+
+	if len(kvalidators) > 0 {
+		g.pValidatorTypeBlock(valKey, "k", "localK", kvalidators)
 	}
 
 	if shouldOmitEmpty && *valValue.Type == descriptor.FieldDescriptorProto_TYPE_STRING {
@@ -2216,9 +2220,12 @@ func (g *Generator) generateMessage(message *Descriptor) {
 		fieldNames[field] = fieldName
 		fieldGetterNames[field] = fieldGetterName
 
-		fieldValidators[field] = g.goValidTags(field)
-
 		oneof := field.OneofIndex != nil
+
+		if !oneof {
+			fieldValidators[field] = g.goValidTags(field)
+		}
+
 		if oneof && oneofFieldName[*field.OneofIndex] == "" {
 			odp := message.OneofDecl[int(*field.OneofIndex)]
 			fname := allocNames(CamelCase(odp.GetName()))[0]
@@ -2336,8 +2343,6 @@ func (g *Generator) generateMessage(message *Descriptor) {
 	g.In()
 	g.P("changed := false")
 	for field, tags := range fieldValidators {
-		g.P("")
-		g.P("// ", *field.Name, ": ", tags)
 		g.pValidatorBlock(field, tags)
 	}
 	g.P("return changed, nil")

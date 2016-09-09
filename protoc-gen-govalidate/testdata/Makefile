@@ -41,7 +41,7 @@ test:	golden testbuild
 #	@echo PASS
 
 my_test/test.pb.go: my_test/test.proto
-	protoc --go_out=Mmulti/multi1.proto=github.com/watchly/protobuf/protoc-gen-govalidate/testdata/multi:. $<
+	protoc --govalidate_out=Mmulti/multi1.proto=github.com/watchly/protobuf/protoc-gen-govalidate/testdata/multi:. $<
 
 golden:
 	make -B my_test/test.pb.go
@@ -58,7 +58,7 @@ testbuild:	regenerate
 
 regenerate:
 	# Invoke protoc once to generate three independent .pb.go files in the same package.
-	protoc --go_out=. multi/multi{1,2,3}.proto
+	protoc --govalidate_out=. multi/multi{1,2,3}.proto
 
 #extension_test:	extension_test.$O
 #	$(LD) -L. -o $@ $<
