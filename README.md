@@ -15,8 +15,12 @@ syntax = "proto3";
 
 package user;
 
-import "descriptor.proto";
-
+// This block is *required* - it tells protoc that we want to extend it. 
+// The descriptor.proto should be available as part of your protobuf3 
+// installation. In the worst case, you can copy it from the github.com/google/protobuf
+// project and import it locally - but I recommend having a proper 
+// installation of protobuf-dev (see Installation instructions below)
+import "google/protobuf/descriptor.proto";
 extend google.protobuf.FieldOptions {
   string valid = 71111;
 }
