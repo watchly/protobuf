@@ -68,7 +68,7 @@ Will be parsed and the generated code will allow you to do:
   if err := proto.Unmarshal(body, &user); err != nil {
     return err
   }
-  
+
   if changed, err := user.Validate(); err != nil {
     // The User struct or one of it's nested structs did not validate
     // as per the rules in the .proto file
@@ -139,7 +139,7 @@ For a look at the generated code for the example `proto` file above, scroll furt
 
 
 
-### Say Hi
+### Author
 
  [@njpatel](https://twitter.com/njpatel)
 

@@ -207,6 +207,8 @@ func (m *Request) Validate() (bool, error) {
 		localK := k
 		localV := v
 
+		// k:
+
 		// validate message. use `ignore` to suppress this validation
 		if v != nil {
 			if change, err := v.Validate(); err != nil {
@@ -225,6 +227,10 @@ func (m *Request) Validate() (bool, error) {
 	for k, v := range m.NameMapping {
 		localK := k
 		localV := v
+
+		// k:
+
+		// v:
 
 		if k != localK || v != localV {
 			delete(m.NameMapping, k)

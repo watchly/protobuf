@@ -1642,6 +1642,9 @@ func (g *Generator) goValidTags(field *descriptor.FieldDescriptorProto) string {
 }
 
 func (g *Generator) pValidatorStringBlock(fieldName, localFieldName string, validators []string) {
+	g.P()
+	g.P("// ", fieldName, ": ", strings.Join(validators, ","))
+
 	for _, validator := range validators {
 		validator := strings.TrimSpace(validator)
 		if validator == "" {
@@ -1665,7 +1668,11 @@ func (g *Generator) pValidatorStringBlock(fieldName, localFieldName string, vali
 		}
 
 		if matches := validatorTruncateMatch.FindStringSubmatch(validator); len(matches) > 0 {
+			g.P("if len(", localFieldName, ") > ", matches[1], " {")
+			g.In()
 			g.P(localFieldName, " = ", localFieldName, "[:", matches[1], "]")
+			g.Out()
+			g.P("}")
 			continue
 		}
 
@@ -1861,6 +1868,9 @@ func (g *Generator) pValidatorMessageBlock(field *descriptor.FieldDescriptorProt
 }
 
 func (g *Generator) pValidatorNumberBlock(fieldName, localFieldName string, validators []string) {
+	g.P()
+	g.P("// ", fieldName, ": ", strings.Join(validators, ","))
+
 	for _, validator := range validators {
 		validator = strings.TrimSpace(validator)
 
@@ -1892,7 +1902,10 @@ func (g *Generator) pValidatorNumberBlock(fieldName, localFieldName string, vali
 	}
 }
 
-func (g *Generator) pValidatorFloat64Bloack(fieldName, localFieldName string, validators []string) {
+func (g *Generator) pValidatorFloat64Block(fieldName, localFieldName string, validators []string) {
+	g.P()
+	g.P("// ", fieldName, ": ", strings.Join(validators, ","))
+
 	for _, validator := range validators {
 		validator = strings.TrimSpace(validator)
 
@@ -1915,12 +1928,15 @@ func (g *Generator) pValidatorFloat32Block(fieldName, localFieldName string, val
 	castedFieldName := localFieldName + "AsFloat64"
 	g.P(castedFieldName, " := ", "float64(", localFieldName, ")")
 
-	g.pValidatorFloat64Bloack(fieldName, castedFieldName, validators)
+	g.pValidatorFloat64Block(fieldName, castedFieldName, validators)
 
 	g.P(localFieldName, " = float32(", castedFieldName, ")")
 }
 
 func (g *Generator) pValidatorRepeatedBlock(field *descriptor.FieldDescriptorProto, fieldName, localFieldName string, validators []string) {
+
+	g.P()
+	g.P("// ", fieldName, ": ", strings.Join(validators, ","))
 
 	var shouldOmitEmpty bool
 	for i, validator := range validators {
@@ -1930,8 +1946,6 @@ func (g *Generator) pValidatorRepeatedBlock(field *descriptor.FieldDescriptorPro
 			break
 		}
 	}
-
-	g.P("// newValidators ", strings.Join(validators, ","))
 
 	if shouldOmitEmpty && *field.Type == descriptor.FieldDescriptorProto_TYPE_STRING {
 		g.P()
@@ -1988,7 +2002,7 @@ func (g *Generator) pValidatorTypeBlock(field *descriptor.FieldDescriptorProto, 
 	case descriptor.FieldDescriptorProto_TYPE_FLOAT:
 		g.pValidatorFloat32Block(fieldName, localFieldName, validators)
 	case descriptor.FieldDescriptorProto_TYPE_DOUBLE:
-		g.pValidatorFloat64Bloack(fieldName, localFieldName, validators)
+		g.pValidatorFloat64Block(fieldName, localFieldName, validators)
 	case descriptor.FieldDescriptorProto_TYPE_STRING:
 		g.pValidatorStringBlock(fieldName, localFieldName, validators)
 	default:
