@@ -1683,7 +1683,7 @@ func (g *Generator) pValidatorStringBlock(fieldName, localFieldName string, vali
 			negate = true
 		}
 
-		negatefieldName := strings.Split(validator, "(")[0] + localFieldName + "Negate"
+		negatefieldName := strings.Split(validator, "(")[0] + CamelCase(localFieldName) + "Negated"
 		g.P(negatefieldName, " := ", negate)
 
 		var methodCall string
@@ -1722,20 +1722,94 @@ func (g *Generator) pValidatorStringBlock(fieldName, localFieldName string, vali
 	}
 }
 
-func (g *Generator) pValidatorMessageBlock(field *descriptor.FieldDescriptorProto, tags string) {
-	if strings.HasPrefix(tags, "ignore") {
-		return
+func (g *Generator) pValidatorMapBlock(field *descriptor.FieldDescriptorProto, d *Descriptor, fieldName, tags string) {
+	keyTags := ""
+	valTags := ""
+
+	// expects tags = "[trim,truncate(50)]trim,truncate(255)"
+	if parts := strings.Split(tags, "]"); len(parts) > 1 {
+		keyTags = strings.TrimSpace(parts[0][1:])
+		valTags = strings.TrimSpace(parts[1])
+	} else {
+		valTags = strings.TrimSpace(tags)
 	}
 
+	kvalidators := strings.Split(keyTags, ",")
+	vvalidators := strings.Split(valTags, ",")
+
+	g.P("// map validation k:", keyTags, " v: ", valTags)
+
+	g.P("for k, v := range m.", fieldName, " {")
+	g.In()
+	g.P("localK := k")
+	g.P("localV := v")
+
+	valKey, valValue := d.Field[0], d.Field[1]
+
+	if len(kvalidators) > 0 {
+		g.pValidatorTypeBlock(valKey, "k", "localK", kvalidators)
+	}
+
+	var shouldOmitEmpty bool
+	for i, validator := range vvalidators {
+		if strings.TrimSpace(validator) == "omitempty" {
+			shouldOmitEmpty = true
+			vvalidators = append(vvalidators[:i], vvalidators[i+1:]...)
+			break
+		}
+	}
+
+	if shouldOmitEmpty && *valValue.Type == descriptor.FieldDescriptorProto_TYPE_STRING {
+		g.P()
+		g.P("// omitempty")
+		g.P("if strings.TrimSpace(localV) == \"\" {")
+		g.In()
+		g.P("delete(m.", fieldName, ", k)")
+		g.P("continue")
+		g.Out()
+		g.P("}")
+	}
+
+	if *valValue.Type == descriptor.FieldDescriptorProto_TYPE_MESSAGE {
+		g.P()
+		g.P("// validate message. use `ignore` to suppress this validation")
+		g.P("if v != nil {")
+		g.In()
+		g.P("if change, err := v.Validate(); err != nil {")
+		g.In()
+		g.P("return change, err")
+		g.Out()
+		g.P(" } else if change {")
+		g.In()
+		g.P("changed = change")
+		g.Out()
+		g.P("}")
+		g.Out()
+		g.P("}")
+	} else if len(vvalidators) > 0 {
+		g.pValidatorTypeBlock(valValue, "v", "localV", vvalidators)
+	}
+
+	g.P()
+	g.P("if k != localK || v != localV {")
+	g.In()
+	g.P("delete(m.", fieldName, ", k)")
+	g.P("m.", fieldName, "[localK] = localV")
+	g.Out()
+	g.P("}")
+
+	g.Out()
+	g.P("}")
+}
+
+func (g *Generator) pValidatorMessageBlock(field *descriptor.FieldDescriptorProto, tags string) {
 	fieldName := CamelCase(*field.Name)
 
 	// If it's a map, detect value is type message
 	desc := g.ObjectNamed(field.GetTypeName())
 	if d, ok := desc.(*Descriptor); ok && d.GetOptions().GetMapEntry() {
-		valField := d.Field[1]
-		if *valField.Type != descriptor.FieldDescriptorProto_TYPE_MESSAGE {
-			return
-		}
+		g.pValidatorMapBlock(field, d, fieldName, tags)
+		return
 	}
 
 	if *field.Label == descriptor.FieldDescriptorProto_LABEL_REPEATED {
@@ -1827,7 +1901,7 @@ func (g *Generator) pValidatorFloat64Bloack(fieldName, localFieldName string, va
 }
 
 func (g *Generator) pValidatorFloat32Block(fieldName, localFieldName string, validators []string) {
-	castedFieldName := localFieldName + "Casted"
+	castedFieldName := localFieldName + "AsFloat64"
 	g.P(castedFieldName, " := ", "float64(", localFieldName, ")")
 
 	g.pValidatorFloat64Bloack(fieldName, castedFieldName, validators)
@@ -1841,9 +1915,12 @@ func (g *Generator) pValidatorRepeatedBlock(field *descriptor.FieldDescriptorPro
 	for i, validator := range validators {
 		if strings.TrimSpace(validator) == "omitempty" {
 			shouldOmitEmpty = true
-			copy(validators[i:], validators[i+1:])
+			validators = append(validators[:i], validators[i+1:]...)
+			break
 		}
 	}
+
+	g.P("// newValidators ", strings.Join(validators, ","))
 
 	if shouldOmitEmpty && *field.Type == descriptor.FieldDescriptorProto_TYPE_STRING {
 		g.P()
@@ -1873,29 +1950,13 @@ func (g *Generator) pValidatorRepeatedBlock(field *descriptor.FieldDescriptorPro
 	g.P("for i, v := range ", localFieldName, " {")
 	g.In()
 
-	g.P("_local := v")
+	g.P("local := v")
 
-	switch *field.Type {
-	case descriptor.FieldDescriptorProto_TYPE_INT32,
-		descriptor.FieldDescriptorProto_TYPE_INT64,
-		descriptor.FieldDescriptorProto_TYPE_UINT32,
-		descriptor.FieldDescriptorProto_TYPE_UINT64,
-		descriptor.FieldDescriptorProto_TYPE_SINT32,
-		descriptor.FieldDescriptorProto_TYPE_SINT64:
-		g.pValidatorNumberBlock("v", "_local", validators)
-	case descriptor.FieldDescriptorProto_TYPE_FLOAT:
-		g.pValidatorFloat32Block("v", "_local", validators)
-	case descriptor.FieldDescriptorProto_TYPE_DOUBLE:
-		g.pValidatorFloat64Bloack("v", "_local", validators)
-	case descriptor.FieldDescriptorProto_TYPE_STRING:
-		g.pValidatorStringBlock("v", "_local", validators)
-	default:
-		g.P("// repeated fieldtype ", *field.Type, " unsupported")
-	}
+	g.pValidatorTypeBlock(field, "v", "local", validators)
 
-	g.P("if v != _local {")
+	g.P("if v != local {")
 	g.In()
-	g.P("m.", fieldName, "[i] = _local")
+	g.P("m.", fieldName, "[i] = local")
 	g.P("changed = true")
 	g.Out()
 	g.P("}")
@@ -1904,33 +1965,7 @@ func (g *Generator) pValidatorRepeatedBlock(field *descriptor.FieldDescriptorPro
 	g.P("}")
 }
 
-func (g *Generator) pValidatorBlock(field *descriptor.FieldDescriptorProto, tags string) {
-	if *field.Type == descriptor.FieldDescriptorProto_TYPE_MESSAGE {
-		g.pValidatorMessageBlock(field, tags)
-		return
-	}
-
-	if strings.TrimSpace(tags) == "" {
-		return
-	}
-
-	validators := strings.Split(tags, ",")
-	if len(validators) == 0 {
-		return
-	}
-
-	fieldName := CamelCase(*field.Name)
-	localFieldName := "_" + strings.ToLower(fieldName)
-	g.P(localFieldName, " := m.", fieldName)
-
-	// Ignore scalar arrays
-	if *field.Label == descriptor.FieldDescriptorProto_LABEL_REPEATED {
-		g.pValidatorRepeatedBlock(field, fieldName, localFieldName, validators)
-		return
-	}
-
-	fieldName = "m." + fieldName
-
+func (g *Generator) pValidatorTypeBlock(field *descriptor.FieldDescriptorProto, fieldName, localFieldName string, validators []string) {
 	switch *field.Type {
 	case descriptor.FieldDescriptorProto_TYPE_INT32,
 		descriptor.FieldDescriptorProto_TYPE_INT64,
@@ -1946,8 +1981,42 @@ func (g *Generator) pValidatorBlock(field *descriptor.FieldDescriptorProto, tags
 	case descriptor.FieldDescriptorProto_TYPE_STRING:
 		g.pValidatorStringBlock(fieldName, localFieldName, validators)
 	default:
-		g.P("// fieldtype ", *field.Type, " unsupported")
+		g.P("// fieldtype ", field.GetTypeName(), " unsupported")
 	}
+}
+
+func (g *Generator) pValidatorBlock(field *descriptor.FieldDescriptorProto, tags string) {
+	if strings.HasPrefix(tags, "ignore") {
+		return
+	}
+
+	if *field.Type == descriptor.FieldDescriptorProto_TYPE_MESSAGE {
+		g.pValidatorMessageBlock(field, tags)
+		return
+	}
+
+	if strings.TrimSpace(tags) == "" {
+		return
+	}
+
+	validators := strings.Split(tags, ",")
+	if len(validators) == 0 {
+		return
+	}
+
+	fieldName := CamelCase(*field.Name)
+	localFieldName := strings.ToLower(fieldName)
+	g.P(localFieldName, " := m.", fieldName)
+
+	// Ignore scalar arrays
+	if *field.Label == descriptor.FieldDescriptorProto_LABEL_REPEATED {
+		g.pValidatorRepeatedBlock(field, fieldName, localFieldName, validators)
+		return
+	}
+
+	fieldName = "m." + fieldName
+
+	g.pValidatorTypeBlock(field, fieldName, localFieldName, validators)
 
 	g.P("changed = changed || ", localFieldName, " != ", fieldName)
 	g.P(fieldName, " = ", localFieldName)
