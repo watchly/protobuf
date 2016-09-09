@@ -1629,45 +1629,28 @@ func (g *Generator) goValidTags(field *descriptor.FieldDescriptorProto) string {
 	return valid
 }
 
-func (g *Generator) pValidatorBlock(field *descriptor.FieldDescriptorProto, tags string) {
+func (g *Generator) pValidatorMessageBlock(field *descriptor.FieldDescriptorProto, tags string) {
+	if strings.HasPrefix(tags, "ignore") {
+		return
+	}
 
 	fieldName := CamelCase(*field.Name)
 
-	// Handle validating nested messages
-	if *field.Type == descriptor.FieldDescriptorProto_TYPE_MESSAGE {
-		// If it's a map, detect value is type message
-		desc := g.ObjectNamed(field.GetTypeName())
-		if d, ok := desc.(*Descriptor); ok && d.GetOptions().GetMapEntry() {
-			valField := d.Field[1]
-			if *valField.Type != descriptor.FieldDescriptorProto_TYPE_MESSAGE {
-				return
-			}
-		}
-
-		if *field.Label == descriptor.FieldDescriptorProto_LABEL_REPEATED {
-			g.P("for _, f := range m.", fieldName, " {")
-			g.In()
-			g.P("if f != nil {")
-			g.In()
-			g.P("if change, err := f.Validate(); err != nil {")
-			g.In()
-			g.P("return change, err")
-			g.Out()
-			g.P(" } else if change {")
-			g.In()
-			g.P("changed = change")
-			g.Out()
-			g.P("}")
-			g.Out()
-			g.P("}")
-			g.Out()
-			g.P("}")
+	// If it's a map, detect value is type message
+	desc := g.ObjectNamed(field.GetTypeName())
+	if d, ok := desc.(*Descriptor); ok && d.GetOptions().GetMapEntry() {
+		valField := d.Field[1]
+		if *valField.Type != descriptor.FieldDescriptorProto_TYPE_MESSAGE {
 			return
 		}
+	}
 
-		g.P("if m.", fieldName, " != nil {")
+	if *field.Label == descriptor.FieldDescriptorProto_LABEL_REPEATED {
+		g.P("for _, f := range m.", fieldName, " {")
 		g.In()
-		g.P("if change, err := m.", fieldName, ".Validate(); err != nil {")
+		g.P("if f != nil {")
+		g.In()
+		g.P("if change, err := f.Validate(); err != nil {")
 		g.In()
 		g.P("return change, err")
 		g.Out()
@@ -1678,8 +1661,33 @@ func (g *Generator) pValidatorBlock(field *descriptor.FieldDescriptorProto, tags
 		g.P("}")
 		g.Out()
 		g.P("}")
+		g.Out()
+		g.P("}")
 		return
 	}
+
+	g.P("if m.", fieldName, " != nil {")
+	g.In()
+	g.P("if change, err := m.", fieldName, ".Validate(); err != nil {")
+	g.In()
+	g.P("return change, err")
+	g.Out()
+	g.P(" } else if change {")
+	g.In()
+	g.P("changed = change")
+	g.Out()
+	g.P("}")
+	g.Out()
+	g.P("}")
+}
+
+func (g *Generator) pValidatorBlock(field *descriptor.FieldDescriptorProto, tags string) {
+	if *field.Type == descriptor.FieldDescriptorProto_TYPE_MESSAGE {
+		g.pValidatorMessageBlock(field, tags)
+		return
+	}
+
+	fieldName := CamelCase(*field.Name)
 
 	// Ignore scalar arrays
 	if *field.Label == descriptor.FieldDescriptorProto_LABEL_REPEATED {
