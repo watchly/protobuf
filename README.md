@@ -1,19 +1,12 @@
-# Go support for Protocol Buffers
+# protoc-gen-govalidate
 
-Google's data interchange format.
-Copyright 2010 The Go Authors.
-https://github.com/golang/protobuf
-
-This package and the code it generates requires at least Go 1.4.
-
-This software implements Go bindings for protocol buffers.  For
-information about protocol buffers themselves, see
-	https://developers.google.com/protocol-buffers/
+This fork of `github.com/golang/protobuf` adds support for `govalidate` based validation to protobuf output files. It does this by using the `extend` functionality of protobuf to let you define a new field that is then plucked out and a `Validate()` function written. For example:
 
 
-## Govalidate Support Notes
 
-This fork of `github.com/golang/protobuf` adds support for `govalidate` based validation to protobuf output files. It does this by (ab)using the `extend` functionality of protobuf to let you define a new field that is then plucked out and a `Validate()` function written. For example:
+**This is ALPHA software - feedback & fixes much appreciated**
+
+
 
 **user.proto**
 
@@ -22,28 +15,37 @@ syntax = "proto3";
 
 package user;
 
-// Required for the FieldOptions block below
-import "google/protobuf/descriptor.proto";
+import "descriptor.proto";
 
-// Annoying but required. You can push this out to a
-// shared.proto and import it in every file you wish
-// to have validation in
 extend google.protobuf.FieldOptions {
   string valid = 71111;
 }
 
 message User {
   string name    = 1 [(valid)="trim,truncate(256),length(3|256),alpha"];
-  int32  age     = 2;
+  int32  age     = 2 [(valid)="min(0),max(120)"];
   string email   = 3 [(valid)="trim,tolower,email"];
   string website = 4 [(valid)="trim,url"];
 
-  repeated Address addresses = 5;
-  map<string, Phone> numbers = 6;
+  double rating  = 5 [(valid)="min(0.0),max(1.0)"];
+  float  average = 6 [(valid)="min(0.0),max(1.0)"];
+  float  stars   = 7 [(valid)="floor,min(0.0),max(5.0)"];
 
-  map<string, string> properties = 7;
+  // Will remove empty strings from the array, and then will
+  // run what's left through trim,truncate,... and replace
+  // those that change in the array
+  repeated string tags = 8 [(valid)="omitempty,trim,truncate(50),alpha"];
+
+  repeated Address addresses = 10;  // Will call .Validate() on each Address in addresses
+  map<string, Phone> numbers = 11;  // Will call .Validate() on each Phone value automatically
+
+  // types in maps are also supported, santization functions like trim & truncate
+  // will update the map's key or value if there were changes
+  // omitempty will rid the map of any keys who's string values are empty
+  // the tags are declared like a normal go map:
+  // [(valid)="[KEY_TAGS]VALUE_TAGS"]
+  map<string, string> properties = 12 [(valid)="[trim,truncate(50)]omitempty,trim,truncate(255)"];
 }
-
 
 message Phone {
   string number = 1 [(valid)="trim,truncate(50),length(5|50)"];
@@ -54,133 +56,326 @@ message Address {
 }
 ```
 
-becomes
 
-**user.pb.go**
+
+Will be parsed and the generated code will allow you to do:
+
+
 
 ```go
+{
+  user := api.User{}
+  if err := proto.Unmarshal(body, &user); err != nil {
+    return err
+  }
+  
+  if changed, err := user.Validate(); err != nil {
+    // The User struct or one of it's nested structs did not validate
+    // as per the rules in the .proto file
+    return err
+  } else if changed {
+    // one or more of the values have been sanitized as per the ruls in the
+    // proto file i.e. strings have been trimmed, or ints have been min/max'd
+    fmt.Println("input had to be sanitized`")
+  }
+}
+```
+
+
+
+For a look at the generated code for the example `proto` file above, scroll further down.
+
+
+
+## Features
+
+- **string validation**
+  - All tag-based validators (including param validators) are supported from https://github.com/asaskevich/govalidator
+- **string santization** is supported with the following in-built sanitizers:
+  - `trim`: trims leading and trailing whitespace
+  - `truncate(n)`: truncates the *bytes* of a string to `n` length
+  - `truncaterunes(n)`: truncates the *runes* of a string to `n` length
+  - `tolower` and `toupper`: exactly as you'd expect
+  - Santizers can be **chained** and should be placed before the validators:
+    - `trim,truncate(255),tolower,email`
+  - Negated validators are supported: `trim,host,!url` would confirm the input is a host but not a url
+- **int32, int64, uint32, uint64, sint32, sint64 santization**
+  - `min(n)`: makes sure the number is at least `n`
+  - `max(n)`; makes sure the number is at most `n`
+- **float32 (proto: float), float64 (proto: double) santization**
+  - `ceil`: ceils the value
+  - `floor`: floors the value
+  - `min(n)`: ensures the value is at least `n`
+  - `max(n)`: ensures the value is at most `n`
+  - **note**: float32's are casted to float64, this might not be correct or what you intend - PRs accepted :)
+- **slices validation & sanitization**
+  - `ignore` tag will ignore the slice entirely
+  - **scalar slices** will be validated & sanitized, so integers/floats/string slices can have the same rules as a normal field, and every element will be santized & validated. The slice will be updated with sanitzed values where necessary
+  - **string slices**
+    - `omitempty`: empty (val == "") elements are removed
+  - **struct slices**
+    - Calling `.Validate` on a struct that has a field of struct-slices will call `.Validate()` on any non-nil elements of the slice
+- **maps validation & sanitization**
+  - `ignore` tag will ignore the map entirely
+  - **scalar keys AND/OR values** will be sanitized & validated - so you can sanitize a `map[string]float` for instance so the keys are trimmed & truncated, and the values are all between 0.0 and 1.0
+  - **string values**
+    - `omitempty` is supported to remove any keys from the map that have an empty string value (value == "")
+  - **struct values**
+    - All non-nil struct values will have `.Validate()` called on them when calling on the parent struct
+- **Deep validation of nested structs, maps & arrays**: calling `.Validate()` on the main type will validate all instances of a `message` nested inside of it, such as direct nesting, a map, or a slice
+- **No reflection is used**, as you can from the example output below, the validation functions are called directly
+
+
+
+## Installation
+
+* `go get -u github.com/watchly/protobuf/{protoc,protoc-gen-govalidate}`
+* And then use the following for generating the `pb.go`files:
+  * `protoc --govalidate_out=plugins=grpc:. ./*.proto`
+* **Notes**
+  * You must have the protobuf3 development libraries installed to `import "google/protobuf/descriptor.proto"`
+  * **Linux**: Grab the release from https://github.com/google/protobuf/releases and make sure you include the `include` folder in that archive
+  * **Mac** simply `brew install protobuf —devel —without-python`
+
+
+
+### Say Hi
+
+ [@njpatel](https://twitter.com/njpatel)
+
+
+
+### Generated Validate Function
+
+**user.pb.go (generated)**
+
+```go
+// generated by protoc-gen-govalidate
 // ...
 type User struct {
-  Name       string            `protobuf:"bytes,1,opt,name=name" json:"name,omitempty"`
-  Age        int32             `protobuf:"varint,2,opt,name=age" json:"age,omitempty"`
-  Email      string            `protobuf:"bytes,3,opt,name=email" json:"email,omitempty"`
-  Website    string            `protobuf:"bytes,4,opt,name=website" json:"website,omitempty"`
-  Addresses  []*Address        `protobuf:"bytes,5,rep,name=addresses" json:"addresses,omitempty"`
-  Numbers    map[string]*Phone `protobuf:"bytes,6,rep,name=numbers" json:"numbers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-  Properties map[string]string `protobuf:"bytes,7,rep,name=properties" json:"properties,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Name    string  `protobuf:"bytes,1,opt,name=name" json:"name,omitempty"`
+	Age     int32   `protobuf:"varint,2,opt,name=age" json:"age,omitempty"`
+	Email   string  `protobuf:"bytes,3,opt,name=email" json:"email,omitempty"`
+	Website string  `protobuf:"bytes,4,opt,name=website" json:"website,omitempty"`
+	Rating  float64 `protobuf:"fixed64,5,opt,name=rating" json:"rating,omitempty"`
+	Average float32 `protobuf:"fixed32,6,opt,name=average" json:"average,omitempty"`
+	Stars   float32 `protobuf:"fixed32,7,opt,name=stars" json:"stars,omitempty"`
+	Tags      []string          `protobuf:"bytes,8,rep,name=tags" json:"tags,omitempty"`
+	Addresses []*Address        `protobuf:"bytes,10,rep,name=addresses" json:"addresses,omitempty"`
+	Numbers   map[string]*Phone `protobuf:"bytes,11,rep,name=numbers" json:"numbers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Properties map[string]string `protobuf:"bytes,12,rep,name=properties" json:"properties,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 }
 
 func (m *User) Validate() (bool, error) {
-  changed := false
+	changed := false
+	for _, f := range m.Addresses {
+		if f != nil {
+			if change, err := f.Validate(); err != nil {
+				return change, err
+			} else if change {
+				changed = change
+			}
+		}
+	}
+	age := m.Age
+	if age < 0 {
+		age = 0
+	}
+	if age > 120 {
+		age = 120
+	}
+	changed = changed || age != m.Age
+	m.Age = age
 
-  // email: trim,tolower,email
-  _email := m.Email
+	average := m.Average
+	averageAsFloat64 := float64(average)
+	averageAsFloat64 = math.Min(averageAsFloat64, 0.0)
+	averageAsFloat64 = math.Max(averageAsFloat64, 1.0)
+	average = float32(averageAsFloat64)
+	changed = changed || average != m.Average
+	m.Average = average
 
-  _email = strings.TrimSpace(_email)
+	email := m.Email
 
-  _email = strings.ToLower(_email)
+	email = strings.TrimSpace(email)
 
-  changed = changed || _email != m.Email
-  m.Email = _email
+	email = strings.ToLower(email)
 
-  emailEmailNegate := false
-  if result := govalidator.IsEmail(_email); (!result && !emailEmailNegate) || (result && emailEmailNegate) {
-    return _email != m.Email, fmt.Errorf("%s does not validate as %s", _email, "email")
-  }
+	emailEmailNegated := false
+	if result := govalidator.IsEmail(email); (!result && !emailEmailNegated) || (result && emailEmailNegated) {
+		return email != m.Email, fmt.Errorf("%s does not validate as %s", email, "email")
+	}
 
-  // website: trim,url
-  _website := m.Website
+	changed = changed || email != m.Email
+	m.Email = email
 
-  _website = strings.TrimSpace(_website)
+	name := m.Name
 
-  changed = changed || _website != m.Website
-  m.Website = _website
+	name = strings.TrimSpace(name)
 
-  urlWebsiteNegate := false
-  if result := govalidator.IsURL(_website); (!result && !urlWebsiteNegate) || (result && urlWebsiteNegate) {
-    return _website != m.Website, fmt.Errorf("%s does not validate as %s", _website, "url")
-  }
+	name = func(s string, l int) string {
+		runes := []rune(name)
+		if len(runes) > l {
+			return string(runes[:l])
+		}
+		return s
+	}(name, 256)
 
-  // addresses:
-  for _, f := range m.Addresses {
-    if f != nil {
-      if change, err := f.Validate(); err != nil {
-        return change, err
-      } else if change {
-        changed = change
-      }
-    }
-  }
+	lengthNameNegated := false
+	if result := govalidator.ByteLength(name, "3", "256"); (!result && !lengthNameNegated) || (result && lengthNameNegated) {
+		return name != m.Name, fmt.Errorf("%s does not validate as %s", name, "length(3|256)")
+	}
 
-  // numbers:
-  for _, f := range m.Numbers {
-    if f != nil {
-      if change, err := f.Validate(); err != nil {
-        return change, err
-      } else if change {
-        changed = change
-      }
-    }
-  }
-    // properties:
+	alphaNameNegated := false
+	if result := govalidator.IsAlpha(name); (!result && !alphaNameNegated) || (result && alphaNameNegated) {
+		return name != m.Name, fmt.Errorf("%s does not validate as %s", name, "alpha")
+	}
 
-  // name: trim,truncate(256),length(3|256),alpha
-  _name := m.Name
+	changed = changed || name != m.Name
+	m.Name = name
 
-  _name = strings.TrimSpace(_name)
+	// map validation k: v:
+	for k, v := range m.Numbers {
+		localK := k
+		localV := v
 
-  _name = (func(s string, l int) string {
-    runes := []rune(_name)
-    if len(runes) > l {
-      return string(runes[:l])
-    }
-    return s
-  })(_name, 256)
+		// validate message. use `ignore` to suppress this validation
+		if v != nil {
+			if change, err := v.Validate(); err != nil {
+				return change, err
+			} else if change {
+				changed = change
+			}
+		}
 
-  changed = changed || _name != m.Name
-  m.Name = _name
+		if k != localK || v != localV {
+			delete(m.Numbers, k)
+			m.Numbers[localK] = localV
+		}
+	}
+	// map validation k:trim,truncate(50) v: omitempty,trim,truncate(255)
+	for k, v := range m.Properties {
+		localK := k
+		localV := v
 
-  lengthNameNegate := false
-  if result := govalidator.ByteLength(_name, "3", "256"); (!result && !lengthNameNegate) || (result && lengthNameNegate) {
-    return _name != m.Name, fmt.Errorf("%s does not validate as %s", _name, "length(3|256)")
-  }
+		localK = strings.TrimSpace(localK)
 
-  alphaNameNegate := false
-  if result := govalidator.IsAlpha(_name); (!result && !alphaNameNegate) || (result && alphaNameNegate) {
-    return _name != m.Name, fmt.Errorf("%s does not validate as %s", _name, "alpha")
-  }
+		localK = func(s string, l int) string {
+			runes := []rune(localK)
+			if len(runes) > l {
+				return string(runes[:l])
+			}
+			return s
+		}(localK, 50)
 
-  // age:
-  return changed, nil
+		// omitempty
+		if strings.TrimSpace(localV) == "" {
+			delete(m.Properties, k)
+			continue
+		}
+
+		localV = strings.TrimSpace(localV)
+
+		localV = func(s string, l int) string {
+			runes := []rune(localV)
+			if len(runes) > l {
+				return string(runes[:l])
+			}
+			return s
+		}(localV, 255)
+
+		if k != localK || v != localV {
+			delete(m.Properties, k)
+			m.Properties[localK] = localV
+		}
+	}
+	rating := m.Rating
+	rating = math.Min(rating, 0.0)
+	rating = math.Max(rating, 1.0)
+	changed = changed || rating != m.Rating
+	m.Rating = rating
+
+	stars := m.Stars
+	starsAsFloat64 := float64(stars)
+	starsAsFloat64 = math.Floor(starsAsFloat64)
+	starsAsFloat64 = math.Min(starsAsFloat64, 0.0)
+	starsAsFloat64 = math.Max(starsAsFloat64, 5.0)
+	stars = float32(starsAsFloat64)
+	changed = changed || stars != m.Stars
+	m.Stars = stars
+
+	tags := m.Tags
+	// newValidators trim,truncate(50),alpha
+
+	// omitempty, filtering empty values
+	tagsFiltered := tags[:0]
+	for _, v := range tags {
+		if strings.TrimSpace(v) != "" {
+			tagsFiltered = append(tagsFiltered, v)
+		}
+	}
+	if len(m.Tags) != len(tagsFiltered) {
+		m.Tags = tagsFiltered
+		tags = m.Tags
+	}
+
+	for i, v := range tags {
+		local := v
+
+		local = strings.TrimSpace(local)
+
+		local = func(s string, l int) string {
+			runes := []rune(local)
+			if len(runes) > l {
+				return string(runes[:l])
+			}
+			return s
+		}(local, 50)
+
+		alphaLocalNegated := false
+		if result := govalidator.IsAlpha(local); (!result && !alphaLocalNegated) || (result && alphaLocalNegated) {
+			return local != v, fmt.Errorf("%s does not validate as %s", local, "alpha")
+		}
+
+		if v != local {
+			m.Tags[i] = local
+			changed = true
+		}
+	}
+	website := m.Website
+
+	website = strings.TrimSpace(website)
+
+	urlWebsiteNegated := false
+	if result := govalidator.IsURL(website); (!result && !urlWebsiteNegated) || (result && urlWebsiteNegated) {
+		return website != m.Website, fmt.Errorf("%s does not validate as %s", website, "url")
+	}
+
+	changed = changed || website != m.Website
+	m.Website = website
+
+	return changed, nil
 }
-
-// etc ...
 ```
 
 From that point, you can call `m.Validate()` to validate the your protobuf message before you use it.
 
 
 
-**Features:**
+# Go support for Protocol Buffers
 
-* All tag-based validators (including param validators) are supported from https://github.com/asaskevich/govalidator
-* **string santization** is supported with the following in-built sanitizers:
-  * `trim`: trims leading and trailing whitespace
-  * `truncate(n)`: truncates the *runes* of a string to `n` length
-  * `tolower` and `toupper`: exactly as you'd expect
-  * Santizers can be **chained** and should be placed before the validators:
-    * `trim,truncate(255),tolower,email`
-* Negated validators are supported: `host,!url` would confirm the input is a host but not a url
-* **Deep validation of nested structs, maps & arrays**: calling `.Validate()` on the main type will validate all instances of a `message` nested inside of it, such as direct nesting, a map, or a slice
-* **No reflection is used**, as you can from the example above, the validation functions are called directly
+Google's data interchange format.
+Copyright 2010 The Go Authors.
+https://github.com/golang/protobuf
 
+This package and the code it generates requires at least Go 1.4.
 
+This software implements Go bindings for protocol buffers.  For
+information about protocol buffers themselves, see
 
-
-**Notes**
-
-* This binary replaces the existing `protoc-gen-go` binary, install by running `go get -u github.com/watchly/protobuf/protoc-gen-go`
-* If people find it useful, I'll fork upstream properly and make a different binary in the future 😀
+```
+https://developers.google.com/protocol-buffers/
+```
 
 
 
@@ -243,7 +438,7 @@ for a protocol buffer variable v:
 
 -   Names are turned from camel_case to CamelCase for export.
 -   There are no methods on v to set fields; just treat
-          	them as structure fields.
+            	them as structure fields.
     - There are getters that return a field's value if set,
       and return the field's default value if unset.
       The getters work even if the receiver is a nil message.

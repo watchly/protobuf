@@ -89,6 +89,7 @@ type Plugin interface {
 var plugins []Plugin
 
 var validatorTruncateMatch = regexp.MustCompile("^truncate\\((\\d+)\\)$")
+var validatorTruncateRunesMatch = regexp.MustCompile("^truncaterunes\\((\\d+)\\)$")
 var validatorErrors = map[bool]string{
 	false: "%s does not validate as %s",
 	true:  "%s does validate as %s",
@@ -1664,6 +1665,11 @@ func (g *Generator) pValidatorStringBlock(fieldName, localFieldName string, vali
 		}
 
 		if matches := validatorTruncateMatch.FindStringSubmatch(validator); len(matches) > 0 {
+			g.P(localFieldName, " = ", localFieldName, "[:", matches[1], "]")
+			continue
+		}
+
+		if matches := validatorTruncateRunesMatch.FindStringSubmatch(validator); len(matches) > 0 {
 			g.P(localFieldName, " = func(s string, l int) string {")
 			g.In()
 			g.P("runes := []rune(", localFieldName, ")")
