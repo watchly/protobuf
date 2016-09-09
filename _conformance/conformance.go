@@ -1,7 +1,7 @@
 // Go support for Protocol Buffers - Google's data interchange format
 //
 // Copyright 2016 The Go Authors.  All rights reserved.
-// https://github.com/golang/protobuf
+// https://github.com/watchly/protobuf
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -39,9 +39,9 @@ import (
 	"io"
 	"os"
 
-	pb "github.com/golang/protobuf/_conformance/conformance_proto"
-	"github.com/golang/protobuf/jsonpb"
-	"github.com/golang/protobuf/proto"
+	pb "github.com/watchly/protobuf/_conformance/conformance_proto"
+	"github.com/watchly/protobuf/jsonpb"
+	"github.com/watchly/protobuf/proto"
 )
 
 func main() {

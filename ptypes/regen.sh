@@ -2,10 +2,10 @@
 #
 # This script fetches and rebuilds the "well-known types" protocol buffers.
 # To run this you will need protoc and goprotobuf installed;
-# see https://github.com/golang/protobuf for instructions.
+# see https://github.com/watchly/protobuf for instructions.
 # You also need Go and Git installed.
 
-PKG=github.com/golang/protobuf/ptypes
+PKG=github.com/watchly/protobuf/ptypes
 UPSTREAM=https://github.com/google/protobuf
 UPSTREAM_SUBDIR=src/google/protobuf
 PROTO_FILES='
@@ -23,7 +23,7 @@ function die() {
 }
 
 # Sanity check that the right tools are accessible.
-for tool in go git protoc protoc-gen-go; do
+for tool in go git protoc protoc-gen-govalidate; do
   q=$(which $tool) || die "didn't find $tool"
   echo 1>&2 "$tool: $q"
 done

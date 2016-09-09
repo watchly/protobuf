@@ -1,7 +1,7 @@
 # Go support for Protocol Buffers - Google's data interchange format
 #
 # Copyright 2015 The Go Authors.  All rights reserved.
-# https://github.com/golang/protobuf
+# https://github.com/watchly/protobuf
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -30,4 +30,4 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 regenerate:
-	protoc --go_out=Mgoogle/protobuf/any.proto=github.com/golang/protobuf/ptypes/any,Mgoogle/protobuf/duration.proto=github.com/golang/protobuf/ptypes/duration,Mgoogle/protobuf/struct.proto=github.com/golang/protobuf/ptypes/struct,Mgoogle/protobuf/timestamp.proto=github.com/golang/protobuf/ptypes/timestamp,Mgoogle/protobuf/wrappers.proto=github.com/golang/protobuf/ptypes/wrappers:. *.proto
+	protoc --go_out=Mgoogle/protobuf/any.proto=github.com/watchly/protobuf/ptypes/any,Mgoogle/protobuf/duration.proto=github.com/watchly/protobuf/ptypes/duration,Mgoogle/protobuf/struct.proto=github.com/watchly/protobuf/ptypes/struct,Mgoogle/protobuf/timestamp.proto=github.com/watchly/protobuf/ptypes/timestamp,Mgoogle/protobuf/wrappers.proto=github.com/watchly/protobuf/ptypes/wrappers:. *.proto

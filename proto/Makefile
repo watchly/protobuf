@@ -1,7 +1,7 @@
 # Go support for Protocol Buffers - Google's data interchange format
 #
 # Copyright 2010 The Go Authors.  All rights reserved.
-# https://github.com/golang/protobuf
+# https://github.com/watchly/protobuf
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -39,5 +39,5 @@ test: install generate-test-pbs
 generate-test-pbs:
 	make install
 	make -C testdata
-	protoc --go_out=Mtestdata/test.proto=github.com/golang/protobuf/proto/testdata,Mgoogle/protobuf/any.proto=github.com/golang/protobuf/ptypes/any:. proto3_proto/proto3.proto
+	protoc --go_out=Mtestdata/test.proto=github.com/watchly/protobuf/proto/testdata,Mgoogle/protobuf/any.proto=github.com/watchly/protobuf/ptypes/any:. proto3_proto/proto3.proto
 	make

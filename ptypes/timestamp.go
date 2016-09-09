@@ -1,7 +1,7 @@
 // Go support for Protocol Buffers - Google's data interchange format
 //
 // Copyright 2016 The Go Authors.  All rights reserved.
-// https://github.com/golang/protobuf
+// https://github.com/watchly/protobuf
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -38,7 +38,7 @@ import (
 	"fmt"
 	"time"
 
-	tspb "github.com/golang/protobuf/ptypes/timestamp"
+	tspb "github.com/watchly/protobuf/ptypes/timestamp"
 )
 
 const (
