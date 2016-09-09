@@ -95,6 +95,7 @@ For a look at the generated code for the example `proto` file above, scroll furt
 
 - **string validation**
   - All tag-based validators (including param validators) are supported from https://github.com/asaskevich/govalidator
+  - https://github.com/asaskevich/govalidator/blob/df81827fdd59d8b4fb93d8910b286ab7a3919520/types.go#L68 is the full list of supported validators from `govalidator`
 - **string santization** is supported with the following in-built sanitizers:
   - `trim`: trims leading and trailing whitespace
   - `truncate(n)`: truncates the *bytes* of a string to `n` length
