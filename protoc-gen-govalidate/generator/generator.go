@@ -1363,6 +1363,10 @@ func (g *Generator) generateImports() {
 			importPath = substitution
 		}
 		importPath = g.ImportPrefix + importPath
+		// Allow suppressing automatic imports
+		if importPath == "" {
+			continue
+		}
 		// Skip weak imports.
 		if g.weak(int32(i)) {
 			g.P("// skipping weak import ", fd.PackageName(), " ", strconv.Quote(importPath))
@@ -1374,9 +1378,6 @@ func (g *Generator) generateImports() {
 		pname := fd.PackageName()
 		if _, ok := g.usedPackages[pname]; !ok {
 			pname = "_"
-		}
-		if pname == "google_protobuf" {
-			importPath = "github.com/watchly/protobuf/protoc-gen-govalidate/descriptor"
 		}
 		g.P("import ", pname, " ", strconv.Quote(importPath))
 	}
