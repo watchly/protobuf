@@ -90,6 +90,7 @@ var plugins []Plugin
 
 var validatorTruncateMatch = regexp.MustCompile("^truncate\\((\\d+)\\)$")
 var validatorTruncateRunesMatch = regexp.MustCompile("^truncaterunes\\((\\d+)\\)$")
+var validatorLengthRunesMatch = regexp.MustCompile("^lengthrunes\\((\\d+)\\|(\\d+)\\)$")
 var validatorErrors = map[bool]string{
 	false: "%s does not validate as %s",
 	true:  "%s does validate as %s",
@@ -1692,6 +1693,16 @@ func (g *Generator) pValidatorStringBlock(fieldName, localFieldName string, vali
 			continue
 		}
 
+		if matches := validatorLengthRunesMatch.FindStringSubmatch(validator); len(matches) > 0 {
+			g.P("lengthrunes := len([]rune(", localFieldName, "))")
+			g.P("if lengthrunes < ", matches[1], " || lengthrunes > ", matches[2], " {")
+			g.In()
+			g.P("return ", localFieldName, " != ", fieldName, `, fmt.Errorf("`, fieldName, ` has an invalid length")`)
+			g.Out()
+			g.P("}")
+			continue
+		}
+
 		var negate bool
 		if validator[0] == '!' {
 			validator = validator[1:]
@@ -1729,7 +1740,7 @@ func (g *Generator) pValidatorStringBlock(fieldName, localFieldName string, vali
 			negatefieldName,
 			negatefieldName))
 		g.In()
-		g.P("return ", localFieldName, " != ", fieldName, `, fmt.Errorf("`, validatorErrors[negate], `", `, localFieldName, `, "`, validator, `")`)
+		g.P("return ", localFieldName, " != ", fieldName, `, fmt.Errorf("`, fieldName, ": ", validatorErrors[negate], `" , `, localFieldName, `, "`, validator, `")`)
 		g.Out()
 		g.P("}")
 
