@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/golang/protobuf/descriptor"
-	tpb "github.com/golang/protobuf/proto/testdata"
+	"github.com/golang/watchly/descriptor"
+	tpb "github.com/golang/watchly/proto/testdata"
 	protobuf "google.golang.org/genproto/protobuf"
 )
 

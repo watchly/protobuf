@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
-	ppb "github.com/golang/protobuf/proto/proto3_proto"
+	"github.com/watchly/protobuf/proto"
+	ppb "github.com/watchly/protobuf/proto/proto3_proto"
 )
 
 func marshalled() []byte {
